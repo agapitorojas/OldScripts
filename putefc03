@@ -1,0 +1,177 @@
+export TERM=vt100
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+log=$CONCENTRADOR/conector/log/conector.err
+
+[ ! -s $log ] && exit 0
+
+loja=`hostname | cut -c6-8`
+servidor=`hostname`
+
+#
+# 	Verifica ultimo chamado
+#
+	horas_dia=`date +%H`
+	minutos_now=`date +%M`
+	minutos_dia=`echo "(${horas_dia} * 60) + ${minutos_now}" | bc`
+
+	if [ -s $LOG/putefc03_ultimo_alerta ]
+	then
+		_ultimo_chamado=`tail -1 $LOG/putefc03_ultimo_alerta`
+		prx_chamado=`echo "${_ultimo_chamado} + 30" | bc`
+	else
+		prx_chamado=0
+	fi
+
+#
+# Verifica se esta gerando ERRO
+#
+
+numerratual=`grep "erro em " ${log} | wc -l`
+
+if [ ${minutos_dia} -gt ${prx_chamado} ]
+then
+   if [ -s $LOG/qtde_erros_putefc03 ]
+   then
+	numerrold=`cat $LOG/qtde_erros_putefc03 | wc -l`
+	if [ $numerratual -gt $numerrold ]
+	then
+		echo $minutos_dia >$LOG/putefc03_ultimo_alerta
+		grep "erro em " ${log} | wc -l >$LOG/qtde_erros_putefc03
+		ASSUNTO="TEF com ERRO na conector ${servidor} ${horas_dia}"
+		MSG="${servidor} ERRO no conector"
+		ACAO="Reativar conector -> Acionar Suporte CSI"
+		/opt/SMA/cmds/tefcmailmon "${servidor}" "${ASSUNTO}" "${MSG}" "${ACAO}"
+		exit 0
+	fi	
+   fi
+fi
+
+echo ${numerratual} >$LOG/qtde_erros_putefc03
+
+#
+# Verifica se a loja esta aberta
+#
+
+[ "`cut -c12 $CONCENTRADOR/rtcd000`" != "L" ] && exit 0
+
+#
+# Verifica se esta havendo venda e registra hora da ultima venda
+#
+
+datadia=`date +%d`
+datadia=`expr $datadia + 0`
+
+if [ `echo $datadia | wc -c` -eq 2 ]
+then
+	datajjj=`date +%b`"  "${datadia}
+else
+	datajjj=`date +%b`" "${datadia}
+fi
+
+[ `ls -lt $CONCENTRADOR/lgcx* 2>/dev/null | grep "${datajjj}" | wc -l` -eq 0 ] && exit 0
+
+set `ls -lt $CONCENTRADOR/lgcx* | head -1 | tr -d "-"`
+if [ `echo $8 | grep : | wc -l` -eq 0 ]
+then
+	set `ls -lc $CONCENTRADOR/lgcx* | head -1 | tr -d "-"`
+fi
+
+horalogpdv=`echo $8 | tr -d ":"`"00"
+
+#
+#
+#
+
+[ `ps -ef | grep conector | grep -v grep | wc -l` -eq 0 ] && exit 0
+[ ! -s $log ] && exit 0
+
+periodo=10
+
+if [ -s $TABELAS/tab_putefc03 ] 
+then
+   if grep "^${loja}:" $TABELAS/tab_putefc03 >/dev/null 2>&1
+   then
+	periodo=`grep "^${loja}:" $TABELAS/tab_putefc03 | tail -1 | cut -d: -f2`
+   fi
+fi
+
+[ `date +%H` -lt 10 ] && periodo=`expr $periodo + 10`
+
+case $periodo in
+5) 	horam=500
+	horah=4500
+	;;
+10)	horam=1000
+	horah=5000
+	;;
+15)	horam=1500
+	horah=5500
+	;;
+20)	horam=2000
+	horah=6000
+	;;
+25)	horam=2500
+	horah=6500
+	;;
+30)	horam=3000
+	horah=7000
+	;;
+35)	horam=3500
+	horah=7500
+	;;
+40)	horam=4000
+	horah=8000
+	;;
+45)	horam=4500
+	horah=8500
+	;;
+50)	horam=5000
+	horah=9000
+	;;
+55)	horam=5500
+	horah=9500
+	;;
+esac	
+
+min_threshold=`expr 60 - ${periodo}`
+
+#
+# Verifica hora da ultima transacao do conector
+#
+
+datahora=`grep "Buffer sendo enviado para o PDV" $log | tail -1 | cut -d" " -f1,2 | tr -d " " | tr -d ":" | tr -d "/"`
+data=`echo ${datahora} | cut -c1-8`
+hora=`echo ${datahora} | cut -c9-`
+
+decmin=`echo $hora | cut -c3,4`
+
+if [ $decmin -ge $min_threshold ]
+then
+	hora5=`expr ${hora} + ${horah}`
+else
+	hora5=`expr ${hora} + ${horam}`
+fi
+
+horaatual=`date +%H%M%S`
+
+if [ $horaatual -gt $hora5 -a ${horalogpdv} -ge ${hora} ]
+then
+
+	if [ ${minutos_dia} -gt ${prx_chamado} ]
+	then
+#		if [ `netstat -anp | grep conector | grep ESTABLISHED | wc -l` -lt 1 ]
+#		then
+#			ASSUNTO="TEF sem conexao ${servidor} ${horas_dia}"
+#			MSG="${servidor} TEF sem conexao "
+#			ACAO="Reativar conector -> Acionar Suporte CSI"
+#			/opt/SMA/cmds/tefcmailmon "${servidor}" "${ASSUNTO}" "${MSG}" "${ACAO}"
+#		fi
+		echo ${minutos_dia} >$LOG/putefc03_ultimo_alerta
+		ASSUNTO="TEF sem retorno a PDV ${servidor} ${horas_dia}"
+		MSG="${servidor} TEF sem retorno a PDV ${horalogpdv} Conector ${hora}"
+		ACAO=""
+		/opt/SMA/cmds/tefcmailmon "${servidor}" "${ASSUNTO}" "${MSG}" "${ACAO}"
+	fi
+fi
+

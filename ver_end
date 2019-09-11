@@ -1,0 +1,122 @@
+#
+# Programa para calcular endereco da retaguarda e vanguarda de loja
+#
+
+if [ $# -ne 1 ]
+then
+	echo "\nHELP : ver_end <loja>\n"
+	exit 1
+fi
+
+site=$1
+_prefixo=`echo $site | cut -c1,2,3,4`
+loja=$1
+
+XXloja=`expr $loja + 0 2>/dev/null`
+
+if [ ! -s $TABELAS/lojas_rede_antiga ]
+then
+	echo "Falta tabela $TABELAS/lojas_rede_antiga"
+	exit 0
+fi
+
+sed "s/^0\+//" <$TABELAS/lojas_rede_antiga >/tmp/lojas_rede_antiga.$$
+
+
+if grep "^${XXloja}:" /tmp/lojas_rede_antiga.$$ >/dev/null 2>&1
+then
+
+#
+#	primeiro sub-endereco de loja 
+#
+
+EP1=52
+
+if [ $loja -gt 0 -a $loja -le 170 ]
+then
+
+#
+#	calcula o segundo sub-endereco
+#
+
+EP2=`bc <<FIM
+(( $loja * 16 + 68 ) / 256)
+FIM
+`
+#
+#	calcula o terceiro sub-endereco
+#
+
+EP3=`bc <<FIM
+( $loja * 16 + 68 ) % 256
+FIM
+`
+elif [ $loja -ge 171 -a $loja -le 186 ]
+then
+        EP2=10
+        EP3=`expr 69 + $loja`
+elif [ $loja -ge 187 -a $loja -le 441 ]
+then
+        EP2=11
+        EP3=`expr $loja - 186`
+elif [ $loja -ge 442 -a $loja -le 499 ]
+then
+        EP2=12
+        EP3=`expr $loja - 443`
+elif [ $loja -ge 500 -a $loja -le 698 ]
+then
+        EP2=12
+        EP3=`expr $loja - 443`
+elif [ $loja -ge 699 -a $loja -le 954 ]
+then
+	EP2=13
+	EP3=`expr $loja - 699`
+
+elif [ $loja -ge 955 -a $loja -le 999 ]
+then
+	EP2=14
+	EP3=`expr $loja - 954`
+
+fi
+
+end_retg="${EP1}.${EP2}.${EP3}.1"
+
+else
+
+OCT2_INI=23
+OCT3_INI=100
+DIVISOR=256
+VALORM=2
+
+nOCT=`echo "( ${loja} * 2 ) + ${OCT3_INI} - 2" | bc`
+xOCT=`echo "${nOCT} / ${DIVISOR}" | bc`
+
+SUB=`echo "${DIVISOR} * ${xOCT}" | bc`
+
+OCT2=`echo "(${nOCT} / ${DIVISOR}) + ${OCT2_INI}" | bc`
+OCT3=`echo "${nOCT} - ${SUB}" | bc`
+
+end_retg="10.${OCT2}.${OCT3}.1"
+
+fi
+
+rm -f  /tmp/lojas_rede_antiga.$$
+[ $loja -eq 000 ] && end_retg="52.0.40.61"
+[ $loja -eq 013 ] && end_retg="10.114.243.253"
+[ $loja -eq 958 ] && end_retg="52.9.164.201"
+[ $loja -eq 955 ] && end_retg="52.3.187.40"
+[ $loja -eq 956 ] && end_retg="52.9.180.1"
+[ $loja -eq 957 ] && end_retg="10.170.8.2"
+[ $loja -eq 054 ] && end_retg="52.0.4.54"
+[ $loja -eq 959 ] && end_retg="10.114.198.1"
+[ $loja -eq 960 ] && end_retg="10.146.8.5"
+[ $loja -eq 962 ] && end_retg="52.14.7.1"
+[ $loja -eq 961 ] && end_retg="10.153.8.4"
+[ $loja -eq 963 ] && end_retg="10.114.206.1"
+[ $loja -eq 964 ] && end_retg="10.157.8.4"
+#[ $loja -eq 966 ] && end_retg="10.151.8.3"
+[ $loja -eq 1000 ] && end_retg="10.32.154.1"
+[ $loja -eq 1180 ] && end_retg="10.32.154.1"
+
+
+echo -e "${end_retg}\tLoja${loja}" 

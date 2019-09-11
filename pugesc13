@@ -1,0 +1,100 @@
+muname=`uname -s`
+
+checa_pugesc01(){
+	PID=($(pgrep -f 'pugesc01|srgdelet|sgc73043|sgc73008|sgc73002'))
+	if [ "${#PID[@]}" -gt "0" ]; then
+		exit 0
+	fi
+}
+
+case $muname in
+AIX)
+
+loja=`hostname | cut -c6-`
+
+COBSW=-F
+export COBSW
+
+COBDIR=/opt/appsrv41
+export COBDIR
+
+LIBPATH=$COBDIR/coblib:$LIBPATH:/usr/lib
+export LIBPATH
+
+TERM=vt100
+export TERM
+
+executar="$COBDIR/bin/cobrun" 
+
+;;
+
+Linux)
+
+loja=`hostname | cut -c6-`
+
+COBSW=-F
+export COBSW
+
+COBDIR=/opt/microfocus/cobol/
+export COBDIR
+
+LIBPATH=$COBDIR/lib:$LIBPATH:/usr/lib
+export LIBPATH
+
+TERM=vt100
+export TERM
+
+executar="" 
+
+;;
+
+esac
+
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+checa_pugesc01
+
+logg=$LOG/SUSOPO_GES013.ultimo
+_log=$LOG/SUSOPO_GES013
+>$logg
+
+#
+# limpa log
+#
+
+if [ -s ${_log} ]
+then
+	set `wc -l ${_log}`
+	tamanho=$1
+	if [ $tamanho -gt 21000 ]
+	then
+		tail -18000 ${_log} > ${_log}.tmp
+		mv ${_log}.tmp ${_log}
+	fi
+fi
+
+#
+
+umask 00
+
+pusopo34 "Executando sgc73088" $logg
+$executar /lasa1/pdvs/dados/exec/sgc73088 >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando sgc73088" $logg
+
+pusopo34 "Executando sgc73082" $logg
+$executar /lasa1/pdvs/dados/exec/sgc73082 >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando sgc73082" $logg
+
+
+cat $logg >> $_log
+
+#
+

@@ -1,0 +1,224 @@
+export TERM=vt320
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+case `hostname` in
+vn01_666|vn01_999|vn06_013|vn05_888|vn05_054)
+        exit 0
+        ;;
+esac
+
+case `uname -s` in
+AIX) 	LOJA=`/usr/bin/hostname | cut -c6-` 
+	par_rsync="-uvz --timeout=30 --perms --remove-sent-files"
+	;;
+Linux) 	LOJA=`/bin/hostname | cut -c6-` 
+	par_rsync="-vz --timeout=30 --perms --remove-sent-files"
+        ;;
+*)      exit 0
+        ;;
+esac
+
+#
+# 	executa conforme horario de BRASILIA
+#
+
+data=`date +%Y%m%d`
+data_atual=`date +%Y"-"%m"-"%d`
+hora_atual=`date +%H":"%M":"%S`
+
+acertado=0
+if [ -s /opt/SMA/conf/horario_verao ]
+then
+     data_inicio_hr_verao=`tail -1 /opt/SMA/conf/horario_verao | grep -v "^#" | cut -d":" -f1`
+     data_fim_hr_verao=`tail -1 /opt/SMA/conf/horario_verao | grep -v "^#" | cut -d":" -f2`
+     [ `echo $data_inicio_hr_verao | wc -c` -ne 9 ] && data_inicio_hr_verao="88888888"
+     [ `echo $data_fim_hr_verao | wc -c` -ne 9 ] && data_fim_hr_verao="99999999"
+
+     if [ $data -ge $data_inicio_hr_verao -a $data -le $data_fim_hr_verao ]
+     then
+	if grep "^${LOJA}" /opt/SMA/conf/loja_sem_hora_verao >/dev/null 2>&1
+	then
+		TZ=GMT+1 export TZ
+		data_atual=`date +%Y"-"%m"-"%d`
+		hora_atual=`date +%H":"%M":"%S`
+		TZ=Brazil/East export TZ
+
+		if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+		then
+			TZ=GMT+0 export TZ
+			data_atual=`date +%Y"-"%m"-"%d`
+			hora_atual=`date +%H":"%M":"%S`
+			TZ=Brazil/East export TZ
+			acertado=1
+		fi
+	else
+		if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+		then
+			TZ=GMT+1 export TZ
+			data_atual=`date +%Y"-"%m"-"%d`
+			hora_atual=`date +%H":"%M":"%S`
+			TZ=Brazil/East export TZ
+			acertado=1
+		fi
+	
+	fi
+     fi
+fi
+
+if [ $acertado -eq 0 ]
+then
+if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+then
+		TZ=GMT+2 export TZ
+		data_atual=`date +%Y"-"%m"-"%d`
+		hora_atual=`date +%H":"%M":"%S`
+		TZ=Brazil/East export TZ
+fi
+fi
+
+
+########
+
+envia_arquivo(){
+
+if [ -s $TABELAS/servidor_rsync ]
+then
+	maquina=`grep "^1:" $TABELAS/servidor_rsync | cut -d: -f2`
+	cd /tmp
+	su rsync -c "cd /tmp;rsync ${par_rsync} $VARSTAT/TEFC/*A.mysql ${maquina}:/LOCAL_STARX/TEFC >/dev/null 2>&1"
+fi
+
+if [ -s $TABELAS/servidor_rsync_sede ]
+then
+	maquina=`grep "^1:" $TABELAS/servidor_rsync_sede | cut -d: -f2`
+	cd /tmp
+	su rsync -c "cd /tmp;rsync ${par_rsync} $VARSTAT/TEFC/*B.mysql ${maquina}:/LOCAL_STARX/TEFC >/dev/null 2>&1"
+fi
+}
+
+#
+
+logerrtef=$CONCENTRADOR/conector/log/conector.err
+
+dados=`$EXEC/putefc05 2>/dev/null`
+nip=`echo $dados | cut -d: -f1`
+tiponip=`echo $dados | cut -d: -f2`
+comok=`echo $dados | cut -d: -f3`
+nippri=`echo $dados | cut -d: -f4`
+nipsec=`echo $dados | cut -d: -f5`
+
+LIMITVENDA=2000
+MAX_ERROS=3
+
+erro="NA"
+venda="NA"
+mudou_venda=0
+mudou_erro=0
+
+#
+# verifica se tem processo de conexao da porta 1996 em duplicidade
+#
+
+if [ `netstat -anp | grep 1996 | grep conector | wc -l` -gt 1 ]
+then
+	echo "`date` reativando conector por duplicidade" >>/DSOP/DLOG/putefc02.log
+	/DSOP/DEXE/putefc02
+	rm -f /DSOP/DLOG/nip_pri_conector
+	sleep 20
+fi
+
+#
+# verifica se PRISMA aberto
+#
+
+prismaaberto=`cut -c12 $CONCENTRADOR/rtcd000 2>/dev/null | grep "L" | wc -l`
+
+#
+# teste se  tem venda recente
+#
+
+hora=`date +%H`
+
+if [ $prismaaberto -eq 1 ]
+then
+	ultimavenda=`grep -E "Buffer recebido" $logerrtef | tail -1 | cut -d" " -f2 | tr -d ":"`
+	horaatual=`date +%H%M%S`
+
+   	HHatual=`echo $horaatual | cut -c1,2`	
+   	HHvenda=`echo $ultimavenda | cut -c1,2`	
+
+	diferencahora=`echo "$horaatual - $ultimavenda" | bc`
+
+	[ "$diferencahora" = "" ] && diferencahora=0
+	[ $diferencahora -lt 0 ] && diferencahora=`echo "240000 + $horaatual - $ultimavenda" | bc`
+	[ $HHatual -ne $HHvenda ] && diferencahora=`echo "$diferencahora - 4000" | bc`
+	[ $diferencahora -ge $LIMITVENDA ] && venda="Sem venda"
+	
+fi
+
+if [ -s $LOG/tef_sem_venda ]
+then
+	if [ "`cat $LOG/tef_sem_venda`" != "${venda}" ]
+	then
+		mudou_venda=1
+	fi
+fi
+
+echo "${venda}" > $LOG/tef_sem_venda
+
+#
+# teste se tem ERRO
+
+numerrosatuais=`grep -E "ERR conecta|ERR NET_|ERR PING_" ${logerrtef} | wc -l`
+if [ -s $LOG/erros_conector_tef ]
+then
+	numerros_ant=`cat $LOG/erros_conector_tef`
+	dif_num_err=`echo "$numerrosatuais - $numerros_ant" | bc`
+	
+	[ ${dif_num_err} -gt ${MAX_ERROS} ] && erro="Com erro"
+fi
+
+echo "$numerrosatuais" >$LOG/erros_conector_tef
+
+if [ -s $LOG/tef_com_erros ]
+then
+	if [ "`cat $LOG/tef_com_erros`" != "${erro}" ]
+	then
+		mudou_erro=1
+	fi
+fi
+
+echo "${erro}" > $LOG/tef_com_erros
+
+#
+
+minuto=`date +%M`
+if [ $minuto -ne 3 -a $minuto -ne 33 -a \
+     ${mudou_venda} -eq 0 -a ${mudou_erro} -eq 0 ]
+then
+   if [ -s /DSOP/DLOG/nip_pri_conector ]
+   then
+	if [ "`cat /DSOP/DLOG/nip_pri_conector`" = "${dados}" ]
+	then
+		[ `ls $VARSTAT/TEFC/*.mysql 2>/dev/null | wc -l` -gt 0 ] && envia_arquivo
+		exit 0
+	fi
+   fi
+fi
+
+echo "${dados}" >/DSOP/DLOG/nip_pri_conector
+
+[ ! -d $VARSTAT/TEFC ] && mkdir -p $VARSTAT/TEFC
+
+echo "${LOJA},${nip},${tiponip},${comok},${erro},${venda},${nippri},${nipsec},${data_atual},${hora_atual},F" >$VARSTAT/TEFC/conector_dat.${LOJA}A.mysql
+
+cp $VARSTAT/TEFC/conector_dat.${LOJA}A.mysql $VARSTAT/TEFC/conector_dat.${LOJA}B.mysql
+
+chmod -R 777 $VARSTAT/TEFC
+
+tempo=`echo "$RANDOM % 120" | bc`
+sleep ${tempo}
+
+envia_arquivo
+
+#
+

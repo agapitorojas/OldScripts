@@ -1,0 +1,651 @@
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+[ -s /DSOP/DTAB/EH_P2K_TOTAL ] && exit 0
+
+case `hostname` in
+vn01_999|vn06_013|vn05_888|vn05_054)
+	exit 0
+	;;
+esac
+
+case `uname -s` in
+AIX) 	LOJA=`/usr/bin/hostname | cut -c6-` 
+	par_rsync="-uvz --timeout=30 --perms --remove-sent-files"
+	;;
+Linux) 	LOJA=`/bin/hostname | cut -c6-` 
+	par_rsync="-uvz --timeout=30 --perms --remove-sent-files"
+        ;;
+HP-UX)	LOJA=`/usr/bin/hostname | cut -c3-` 
+	par_rsync="-uvz --timeout=30 --perms"
+        ;;
+*)      exit 0
+        ;;
+esac
+
+data_atual=`date +%Y%m%d`
+datahora=`date +%Y%m%d%H%M%S`
+
+########
+
+DIRLOG=$LASA/usr/COMNC/LOG
+
+cd $DIRLOG
+
+DATA=`date +%d"/"%m"/"%Y" - "%H":"%M" h"`
+
+#
+# verifica nos arquivos de fechamento de PDVs 
+# o numero de serie (incompleto)
+# e verifica o campo de status (campo 24) informando se o PDV teve
+# venda, operacao e/ou reducao Z
+# O numero de serie la existente eh incompleto
+#
+
+
+>$DIRLOG/serie_impr.tmp
+
+#
+# INICIO DO WHILE 1
+#
+
+cut -c1-11,24,190-204 lfch???? | grep -v "000000000000000" | sort -r | \
+while read linha
+do
+	registro=`echo $linha | cut -c12`
+	if [ $registro -eq 2 ]
+	then
+		pdv=`echo $linha | cut -c9-11`
+		if grep "^${pdv}" $DIRLOG/serie_impr.tmp >/dev/null 2>&1 
+		then
+		 	continue
+		fi
+		serie=`echo $linha | cut -c13-`
+		[ "$serie" = "" ] && continue
+		echo ${pdv}${registro}${serie} >>$DIRLOG/serie_impr.tmp
+	else
+		continue
+	fi
+done
+
+#
+# FIM DO WHILE 1
+#
+
+sort $DIRLOG/serie_impr.tmp | uniq >$DIRLOG/serie_impr.log
+rm -f $DIRLOG/serie_impr.tmp
+
+#
+#
+# verifica se existe arquivo anterior nao transmitido e concatena com o 
+# resultado da execucao atual
+#
+
+[ -s ${VARSTAT}/PDV/insert_redZ.${LOJA}.mysql_ ] && cat ${VARSTAT}/PDV/insert_redZ.${LOJA}.mysql_ >>${VARSTAT}/PDV/PP_redZ_pdv
+[ -s ${VARSTAT}/PDV/insert_venda.${LOJA}.mysql_ ] && cat ${VARSTAT}/PDV/insert_venda.${LOJA}.mysql_ >>${VARSTAT}/PDV/PP_venda_pdv
+[ -s ${VARSTAT}/PDV/insert_operacao.${LOJA}.mysql_ ] && cat ${VARSTAT}/PDV/insert_operacao.${LOJA}.mysql_ >>${VARSTAT}/PDV/PP_operacao_pdv
+[ -s ${VARSTAT}/PDV/inventario_pdv.${LOJA}.mysql_ ] && cat ${VARSTAT}/PDV/inventario_pdv.${LOJA}.mysql_ >>${VARSTAT}/PDV/PP_inventario_pdv
+
+#
+# inicializa arquivos
+#
+
+>${VARSTAT}/PDV/redZ_pdv.${LOJA}.dado
+>${VARSTAT}/PDV/venda_pdv.${LOJA}.dado
+>${VARSTAT}/PDV/operacao_pdv.${LOJA}.dado
+>${VARSTAT}/PDV/inventario_pdv.${LOJA}.mysql_
+
+>${DIRLOG}/serie_impr.final
+
+touch -t $(date +%Y%m%d0000) /tmp/today
+
+#
+# INICIO DO WHILE 2
+#
+
+cat $DIRLOG/serie_impr.log | \
+while read linha
+do
+	PDV=`echo $linha | cut -c1-3`
+
+   #
+   # NSERIE eh o numero de serie incompleto. O numero de serie completo
+   # soh existe no arquivo de fechamento
+   #
+	NSERIE=`echo $linha | cut -c5-`
+	[ `echo $NSERIE | grep "'" | wc -l` -gt 0 ] && continue
+
+
+   #
+   # PDVS que tiveram venda (arquivos lgcx???)
+   #
+   #
+
+   # INICIO DO FOR 1
+
+#    for arq_venda in `ls -t ${CONCENTRADOR}/../bkseg/lgcx${PDV} \
+#                            ${CONCENTRADOR}/../bkter/lgcx${PDV} \
+#                            ${CONCENTRADOR}/../bkqua/lgcx${PDV} \
+#                            ${CONCENTRADOR}/../bkqui/lgcx${PDV} \
+#                            ${CONCENTRADOR}/../bksex/lgcx${PDV} \
+#                            ${CONCENTRADOR}/../bksab/lgcx${PDV} \
+#                            ${CONCENTRADOR}/../bkdom/lgcx${PDV} \
+#			 2>/dev/null`
+
+	
+	for arq_venda in $(find $CONCENTRADOR/../bk0{{0..2}{0..9},30,31} -maxdepth 1 -type f ! -newer /tmp/today -name "lgcx${PDV}" 2>-)
+    do
+    	DATA_INFOVD=`cat ${arq_venda} 2>/dev/null | head -1 | cut -c1-8`
+	[ "$DATA_INFOVD" = "" ] && continue
+	echo "${LOJA}:${PDV}:${DATA_INFOVD}:${NSERIE}:${data_atual}" >>${VARSTAT}/PDV/venda_pdv.${LOJA}.2
+    done
+ 
+    # FIM DO FOR 1
+
+#
+# Le memoria fiscal
+#
+
+ultima_linha=0
+
+MEMORIA=""
+TIPO=""
+NUMREDZ=""
+
+#uncompress /lasa/pdvs/bklasa/bk??/lgfc${PDV}.Z
+#arquivo="`ls -t /lasa/pdvs/bklasa/bk??/lgfc${PDV} ${CONCENTRADOR}/../bk???/lgfc${PDV} 2>/dev/null`"
+
+#arquivo="`ls -t ${CONCENTRADOR}/../bkseg/lgfc${PDV} \
+#${CONCENTRADOR}/../bkter/lgfc${PDV} \
+#${CONCENTRADOR}/../bkqua/lgfc${PDV} \
+#${CONCENTRADOR}/../bkqui/lgfc${PDV} \
+#${CONCENTRADOR}/../bksex/lgfc${PDV} \
+#${CONCENTRADOR}/../bksab/lgfc${PDV} \
+#${CONCENTRADOR}/../bkdom/lgfc${PDV} \
+#${CONCENTRADOR}/../bkseg/lgfc${PDV}b \
+#${CONCENTRADOR}/../bkter/lgfc${PDV}b \
+#${CONCENTRADOR}/../bkqua/lgfc${PDV}b \
+#${CONCENTRADOR}/../bkqui/lgfc${PDV}b \
+#${CONCENTRADOR}/../bksex/lgfc${PDV}b \
+#${CONCENTRADOR}/../bksab/lgfc${PDV}b \
+#${CONCENTRADOR}/../bkdom/lgfc${PDV}b 2>/dev/null`"
+
+arquivo="$(find $CONCENTRADOR/../bk0{{0..2}{0..9},30,31} -maxdepth 1 -type f ! -newer /tmp/today -name "lgfc${PDV}" -o -name "lgfc${PDV}b" 2>-)"
+
+# INICIO DO IF 1
+
+if [ "${arquivo}" != "" ]
+then
+
+ rm -f /tmp/pdv${PDV}.$$ /tmp/redZ${PDV}.$$
+
+ # INICIO DO FOR 2
+
+ for tarq in $arquivo
+ do
+
+   pegou_dt_operacao=0
+   pegou_dt_redZ=0
+
+   #
+   # verifica qual PDV e em qual DATA teve operacao e/ou reducao Z
+   #
+
+   # INICIO DO WHILE 3
+
+   cat -n ${tarq} | strings | tr -s "\t" " " | cut -c1-50 | \
+   while read linha
+   do
+	set `echo $linha`
+	conteudo=`echo $2 | cut -c24`
+
+	[ "$conteudo" = "" ] && continue
+        
+	if [ $conteudo -eq 1 -a $pegou_dt_operacao -eq 0 ]
+	then
+		echo "$linha" >/tmp/pdv${PDV}.$$
+		pegou_dt_operacao=1
+	fi
+
+	if [ $conteudo -eq 2 -a $pegou_dt_redZ -eq 0 ]
+	then
+		echo "$linha" >/tmp/redZ${PDV}.$$
+		pegou_dt_redZ=1
+	fi
+
+	[ $pegou_dt_operacao -eq 1 -a $pegou_dt_redZ -eq 1 ] && break
+   done
+
+   # FIM DO WHILE 3
+
+   #
+   # Se teve operacao pega dados e pega dados se houve reducao tambem
+   # se nao, pega dados somente se houve reducao
+   #
+
+   # INICIO DO IF 2
+   #
+
+   if [ -s /tmp/pdv${PDV}.$$ ]
+   then
+	set `cat /tmp/pdv${PDV}.$$`
+	ultima_linha=$1
+
+	TODALINHA=`cat -n $tarq | strings | tr -s "\t" " " | grep "^ $ultima_linha " | cut -d" " -f3-`
+
+	DATA_INFOOP=`echo $TODALINHA | cut -c1-8`
+	echo "${LOJA}:${PDV}:${DATA_INFOOP}:${NSERIE}:${data_atual}" >>${VARSTAT}/PDV/operacao_pdv.${LOJA}.2
+	
+	MEMORIA1=`echo $TODALINHA | cut -c405-406`
+	MEMORIA2=`echo $TODALINHA | cut -c407-408`
+	TIPOIMPR=`echo $TODALINHA | cut -c322-324`
+
+	if [ "${TIPOIMPR}" != "KR4" -a "${TIPOIMPR}" != "KN4" -a "${TIPOIMPR}" != "PC" -a "${TIPOIMPR}" != "SJ6" ]
+	then
+		fabricante="NA"
+		TIPOIMPR=MAT
+		MEMORIA="99.99"
+		TIPO="matricial"	
+	else 
+		fabricante="ibm"
+		[ "${TIPOIMPR}" = "PC" ] && TIPOIMPR=FS
+		TIPO="termica"
+		MEMORIA="${MEMORIA1}.${MEMORIA2}" 
+		[ "$MEMORIA" = "." ] && MEMORIA="99.99"
+		[ "$MEMORIA" = "00.00" ] && continue
+	fi
+
+   XXXSERIE=""
+
+   #
+   #  pega dados se houve operacao e reducao
+   #
+   # INICIO DO IF 3
+   #
+
+   if [ -s /tmp/redZ${PDV}.$$ ]
+   then
+	set `cat /tmp/redZ${PDV}.$$ 2>/dev/null`
+	ultima_linha=$1
+
+	set `cat -n $tarq | strings | tr -s "\t" " " | grep "^ $ultima_linha "`
+
+	DATA_INFORZ=`echo $2 | cut -c1-8`
+	
+	NUMREDZ=`echo $2 | cut -c41-47`
+	SERIE1=`echo $2 | cut -c521-522`
+	SERIE2=`echo $2 | cut -c497-514`
+
+	if [ "${SERIE1}" != "IB" -a "${SERIE1}" != "DR" -a "${SERIE1}" != "00" ]
+	then
+		fabricante="NA"
+		TIPOIMPR=MAT
+		MEMORIA="99.99"
+		TIPO="matricial"	
+	else 
+		fabricante="ibm"
+		if [ ${SERIE1} = "DR" ]
+		then
+			fabricante="daruma"
+			[ "`echo ${SERIE2} | cut -c1-2`" = "02" ] && TIPOIMPR=FS600
+			[ "`echo ${SERIE2} | cut -c1-2`" = "05" ] && TIPOIMPR=FS700H
+		fi
+
+		TIPO="termica"
+		MEMORIA="${MEMORIA1}.${MEMORIA2}" 
+	fi
+
+	XXXSERIE="${SERIE1}${SERIE2}"
+
+        redMEMORIA=${MEMORIA}
+	if [ "`echo ${MEMORIA} | cut -d. -f1`" != "" ]
+	then
+       		[ `echo $MEMORIA | cut -d. -f1` -le 0 ] && redMEMORIA=""
+	fi
+ 
+	echo "${LOJA}:${PDV}:${XXXSERIE}:${NUMREDZ}:${DATA_INFORZ}:${data_atual}:${TIPOIMPR}:${redMEMORIA}:" >>${VARSTAT}/PDV/redZ_pdv.${LOJA}.2
+
+	rm -f /tmp/redZ${PDV}.$$
+   fi
+
+   #
+   # FIM DO IF 3
+   #
+   
+#
+#
+	[ "${XXXSERIE}" = "" ] && XXXSSERIE=${NSERIE}
+
+	if grep "^${PDV}:" ${DIRLOG}/serie_impr.final >/dev/null 2>&1
+	then
+		:
+	else
+   		echo "${PDV}:${XXXSERIE}:${fabricante}:${TIPO}:${TIPOIMPR}:${MEMORIA}:${DATA_INFOOP}:${data_atual}" >>${DIRLOG}/serie_impr.final
+		echo "${LOJA}:${PDV}:${DATA_INFOOP}:${XXXSERIE}:${fabricante}:${TIPO}:${TIPOIMPR}:${MEMORIA}" >>${VARSTAT}/PDV/inventario_pdv.${LOJA}.mysql_
+	fi
+
+	rm -f /tmp/pdv${PDV}.$$ 
+
+     #
+     #
+ 
+   fi
+
+   #
+   # FIM DO IF 2
+   #
+
+ # FIM DO FOR 2
+
+ done
+
+ # FIM DO IF 1
+
+fi
+
+#
+
+#
+# Ajusta numeros de serie incompletos pelo completo
+
+ed - $DIRLOG/serie_impr.final <<FIM
+1,$ s.:${NSERIE}:.:${XXXSERIE}:.g
+w
+q
+!
+FIM
+
+ed - $VARSTAT/PDV/venda_pdv.${LOJA}.2 <<FIM
+1,$ s.:${NSERIE}:.:${XXXSERIE}:.g
+w
+q
+!
+FIM
+
+ed - $VARSTAT/PDV/operacao_pdv.${LOJA}.2 <<FIM
+1,$ s.:${NSERIE}:.:${XXXSERIE}:.g
+w
+q
+!
+FIM
+
+ed - $VARSTAT/PDV/inventario_pdv.${LOJA}.mysql_ <<FIM
+1,$ s.:${NSERIE}:.:${XXXSERIE}:.g
+w
+q
+!
+FIM
+
+#
+
+# FIM DO WHILE 2
+
+done
+
+## Separa diferenca operacao_pdv
+
+    [ -s ${VARSTAT}/PDV/operacao_pdv.${LOJA}.dado ] && cat ${VARSTAT}/PDV/operacao_pdv.${LOJA}.dado >>${VARSTAT}/PDV/operacao_pdv.${LOJA}.2
+
+    sort ${VARSTAT}/PDV/operacao_pdv.${LOJA}.2 | uniq >${VARSTAT}/PDV/operacao_pdv.${LOJA}.total
+    rm -f ${VARSTAT}/PDV/operacao_pdv.${LOJA}.2
+
+    if [ -s ${VARSTAT}/PDV/operacao_pdv.${LOJA}.anterior ]
+    then
+	for valor1 in `cat ${VARSTAT}/PDV/operacao_pdv.${LOJA}.total 2>/dev/null`
+	do
+	   if grep "^`echo ${valor1} | cut -d: -f1-3`" ${VARSTAT}/PDV/operacao_pdv.${LOJA}.anterior >/dev/null 2>&1
+	   then
+		:
+	   else
+		echo "${valor1}" >>${VARSTAT}/PDV/operacao_pdv.${LOJA}.dado
+	   fi
+	done
+    else
+	cp ${VARSTAT}/PDV/operacao_pdv.${LOJA}.total ${VARSTAT}/PDV/operacao_pdv.${LOJA}.dado
+    fi
+
+    chmod 777 ${VARSTAT}/PDV/operacao_pdv.${LOJA}.dado
+
+#
+# Gera insert do operacao_pdv
+
+>${VARSTAT}/PDV/insert_operacao.${LOJA}.mysql_
+
+cat ${VARSTAT}/PDV/operacao_pdv.???*.dado 2>/dev/null | \
+while read linha
+do
+        uloja=`echo $linha | cut -d: -f1`
+        [ $uloja -lt 1000 ] && uloja=0${uloja}
+        npdv=`echo $linha | cut -d: -f2`
+        udtvenda=`echo $linha | cut -d: -f3`
+        userie=`echo $linha | cut -d: -f4`
+        udata_col=`echo $linha | cut -d: -f5`
+        echo "insert ignore into operacao_pdv values('${uloja}','${npdv}','${udtvenda}','${userie}','${udata_col}');" >>${VARSTAT}/PDV/insert_operacao.${LOJA}.mysql_
+
+done
+
+[ $? -eq 0 ] && rm -f ${VARSTAT}/PDV/operacao_pdv.???*.*.dado
+
+## Separa diferenca redZ_pdv
+
+    [ -s ${VARSTAT}/PDV/redZ_pdv.${LOJA}.dado ] && cat ${VARSTAT}/PDV/redZ_pdv.${LOJA}.dado >>${VARSTAT}/PDV/redZ_pdv.${LOJA}.2
+
+    sort ${VARSTAT}/PDV/redZ_pdv.${LOJA}.2 | uniq >${VARSTAT}/PDV/redZ_pdv.${LOJA}.total
+    rm -f ${VARSTAT}/PDV/redZ_pdv.${LOJA}.2
+
+    if [ -s ${VARSTAT}/PDV/redZ_pdv.${LOJA}.anterior ]
+    then
+	for valor1 in `cat ${VARSTAT}/PDV/redZ_pdv.${LOJA}.total 2>/dev/null`
+	do
+	   if grep "^`echo $valor1 | cut -d: -f1-5`" ${VARSTAT}/PDV/redZ_pdv.${LOJA}.anterior >/dev/null 2>&1
+	   then
+		:
+	   else
+		echo "${valor1}" >>${VARSTAT}/PDV/redZ_pdv.${LOJA}.dado
+	   fi
+	done
+    else
+	cp ${VARSTAT}/PDV/redZ_pdv.${LOJA}.total ${VARSTAT}/PDV/redZ_pdv.${LOJA}.dado
+    fi
+
+    chmod 777 ${VARSTAT}/PDV/redZ_pdv.${LOJA}.dado
+
+#
+# Gera insert do redZ_pdv
+
+>${VARSTAT}/PDV/insert_redZ.${LOJA}.mysql_
+
+cat ${VARSTAT}/PDV/redZ_pdv.???*.dado 2>/dev/null | \
+while read linha
+do
+	uloja=`echo $linha | cut -d: -f1`
+	[ $uloja -lt 1000 ] && uloja=0${uloja}
+	npdv=`echo $linha | cut -d: -f2`
+	userie=`echo $linha | cut -d: -f3`
+	ureducoes=`echo $linha | cut -d: -f4`
+	udtvenda=`echo $linha | cut -d: -f5`
+	udata_col=`echo $linha | cut -d: -f6`
+	umodel=`echo $linha | cut -d: -f7`
+	umemf=`echo $linha | cut -d: -f8`
+	[ "$umemf" = "" ] && umemf="NULL"
+
+	echo "insert ignore into redz_pdv values('${uloja}','${npdv}','${userie}','${ureducoes}','${udtvenda}','${udata_col}','${umodel}',${umemf},'');" >>${VARSTAT}/PDV/insert_redZ.${LOJA}.mysql_
+
+done
+[ $? -eq 0 ] && rm -f ${VARSTAT}/PDV/redZ_pdv.???*.*.dado
+
+#
+#
+
+
+## Separa diferenca venda_pdv
+
+    [ -s ${VARSTAT}/PDV/venda_pdv.${LOJA}.dado ] && cat ${VARSTAT}/PDV/venda_pdv.${LOJA}.dado >>${VARSTAT}/PDV/venda_pdv.${LOJA}.2
+
+    sort ${VARSTAT}/PDV/venda_pdv.${LOJA}.2 | uniq >${VARSTAT}/PDV/venda_pdv.${LOJA}.total
+    rm -f ${VARSTAT}/PDV/venda_pdv.${LOJA}.2
+
+    if [ -s ${VARSTAT}/PDV/venda_pdv.${LOJA}.anterior ]
+    then
+	for valor1 in `cat ${VARSTAT}/PDV/venda_pdv.${LOJA}.total 2>/dev/null`
+	do
+	   if grep "^`echo ${valor1} | cut -d: -f1-3`" ${VARSTAT}/PDV/venda_pdv.${LOJA}.anterior >/dev/null 2>&1
+	   then
+		:
+	   else
+		echo "${valor1}" >>${VARSTAT}/PDV/venda_pdv.${LOJA}.dado
+	   fi
+	done
+    else
+	cp ${VARSTAT}/PDV/venda_pdv.${LOJA}.total ${VARSTAT}/PDV/venda_pdv.${LOJA}.dado
+    fi
+
+    chmod 777 ${VARSTAT}/PDV/venda_pdv.${LOJA}.dado
+
+#
+# Gera insert do venda_pdv
+
+>${VARSTAT}/PDV/insert_venda.${LOJA}.mysql_
+
+cat ${VARSTAT}/PDV/venda_pdv.???*.dado 2>/dev/null | \
+while read linha
+do
+        uloja=`echo $linha | cut -d: -f1`
+        [ $uloja -lt 1000 ] && uloja=0${uloja}
+        npdv=`echo $linha | cut -d: -f2`
+        udtvenda=`echo $linha | cut -d: -f3`
+        userie=`echo $linha | cut -d: -f4`
+        udata_col=`echo $linha | cut -d: -f5`
+        echo "insert ignore into venda_pdv values('${uloja}','${npdv}','${udtvenda}','${userie}','${udata_col}');" >>${VARSTAT}/PDV/insert_venda.${LOJA}.mysql_
+
+done
+[ $? -eq 0 ] && rm -f ${VARSTAT}/PDV/venda_pdv.???*.*.dado
+
+
+##########
+
+TABELAS="/DSOP/DTAB"
+DIR=$CONCENTRADOR
+
+cd $DIR
+
+DATA=`date +%d"/"%m"/"%Y" - "%H":"%M" h"`
+
+. /DSOP/DEXE/pusopo85 menos 30
+dias30=$resp
+. /DSOP/DEXE/pusopo85 menos 60
+dias60=$resp
+
+total30dias=0
+total60dias=0
+total00dias=0
+totalgeral=0
+
+for pdv in `ls rtcd[0-2]?? | grep -v "rtcd000" | cut -c5-7 | grep -v 000`
+do
+	tipoequip=`head -1 ${DIR}/rtcd${pdv} | cut -c4-6`
+	[ "$tipoequip" != "PDV" ] && continue
+
+	versao=`head -1 ${DIR}/rtcd${pdv} | cut -c109-112` 
+	[ "$versao" = "" ] && versao=0
+        [ $pdv -eq 0 -o $versao -eq 0 -o $LOJA -eq 0 ] && continue
+
+	[ $versao -eq 0 ] && versao="NA"
+
+	sit=`head -1 $DIR/rtcd${pdv} |cut -c44-47`
+	ult=`head -1 $DIR/rtcd${pdv} |cut -c67-74`
+	dia=`echo $ult | cut -c1-2`
+	mes=`echo $ult | cut -c3-4`
+	ano=`echo $ult | cut -c5-8`
+	ultatu="${dia}/${mes}/${ano}"
+	juliano="${ano}${mes}${dia}"
+
+	if [ $juliano -ge $dias30 ]
+	then
+		total30dias=`expr $total30dias + 1`
+	elif [ $juliano -lt $dias30 -a $juliano -ge $dias60 ]
+	then
+		total60dias=`expr $total60dias + 1`
+	else
+		total00dias=`expr $total00dias + 1`
+	fi
+
+	totalgeral=`expr $totalgeral + 1`
+
+	[ "$dia" = "00" ] && ultatu="NA"
+	[ "$dia" = "" ] && ultatu="NA"
+	
+	if [ `echo $sit | grep -i a | wc -l` -eq 1 ]
+	then
+		situacao="Abertura de dia"
+
+	elif [ `echo $sit | grep -i v | wc -l` -eq 1 ]
+	then
+		situacao="Em venda"
+
+	elif [ `echo $sit | grep -i pp | wc -l` -eq 1 ]
+	then
+		situacao="Em pausa"
+
+	elif [ `echo $sit | grep -i x | wc -l` -eq 1 ]
+	then
+		situacao="Fechado parcialmente"
+
+	elif [ `echo $sit | grep -i n | wc -l` -eq 1 ]
+	then
+		situacao="Em operação normal"
+
+	elif [ `echo $sit | grep -i z | wc -l` -eq 1 ]
+	then
+		situacao="Dia encerrado"
+
+	else
+		situacao="Indefinida"
+	fi
+
+	dados=`grep "^${pdv}:" ${DIRLOG}/serie_impr.final | cut -d: -f2-7`
+	if [ "$dados" = "" ]
+	then
+	 	dados="NA:NA:NA:NA:0.00:NA"
+		echo "$LOJA:${versao}:${pdv}:$situacao:${dados}:${juliano}:" >> $VARSTAT/NAversao_pdvs.mysql
+	else
+		echo "$LOJA:${versao}:${pdv}:$situacao:${dados}:${juliano}:" >> $VARSTAT/versao_pdvs.mysql
+	fi
+
+
+done
+
+echo "${LOJA}:${totalgeral}:${total30dias}:${total60dias}:${total00dias}:${data_atual}" >$VARSTAT/pdv_totais_${LOJA}.mysql
+
+[ ! -d $VARSTAT/PDV ] && mkdir -p $VARSTAT/PDV
+mv $VARSTAT/versao_pdvs.mysql $VARSTAT/PDV/pdv_relat_${LOJA}.mysql
+mv $VARSTAT/NAversao_pdvs.mysql $VARSTAT/PDV/NApdv_relat_${LOJA}.mysql
+
+mv $VARSTAT/pdv_totais_${LOJA}.mysql $VARSTAT/PDV/pdv_totais_${LOJA}.mysql
+
+
+tempo=`echo "${RANDOM} % 60" | bc`
+sleep ${tempo}
+
+find ${VARSTAT}/PDV -type f -name "*mysql_" -size 0 -exec rm -f {} \;
+
+[ -s ${VARSTAT}/PDV/PP_redZ_pdv ] && cat ${VARSTAT}/PDV/PP_redZ_pdv >>${VARSTAT}/PDV/insert_redZ.${LOJA}.mysql_ 
+[ -s ${VARSTAT}/PDV/PP_venda_pdv ] && cat ${VARSTAT}/PDV/PP_venda_pdv >>${VARSTAT}/PDV/insert_venda.${LOJA}.mysql_ 
+[ -s ${VARSTAT}/PDV/PP_operacao_pdv ] && cat ${VARSTAT}/PDV/PP_operacao_pdv >>${VARSTAT}/PDV/insert_operacao.${LOJA}.mysql_ 
+[ -s ${VARSTAT}/PDV/PP_inventario_pdv ] && cat ${VARSTAT}/PDV/PP_inventario_pdv >>${VARSTAT}/PDV/inventario_pdv.${LOJA}.mysql_ 
+
+rm -f ${VARSTAT}/PDV/PP_redZ_pdv ${VARSTAT}/PDV/PP_venda_pdv ${VARSTAT}/PDV/PP_operacao_pdv ${VARSTAT}/PDV/PP_inventario_pdv
+
+for TTu in insert_redZ insert_venda insert_operacao inventario_pdv
+do
+
+	[ -s ${VARSTAT}/PDV/${TTu}.${LOJA}.mysql_ ] && mv ${VARSTAT}/PDV/${TTu}.${LOJA}.mysql_ ${VARSTAT}/PDV/${TTu}.${LOJA}.${datahora}.mysql
+done
+
+
+mv ${VARSTAT}/PDV/venda_pdv.${LOJA}.total ${VARSTAT}/PDV/venda_pdv.${LOJA}.anterior
+mv ${VARSTAT}/PDV/operacao_pdv.${LOJA}.total ${VARSTAT}/PDV/operacao_pdv.${LOJA}.anterior
+mv ${VARSTAT}/PDV/redZ_pdv.${LOJA}.total ${VARSTAT}/PDV/redZ_pdv.${LOJA}.anterior
+
+rm -f ${VARSTAT}/PDV/*.total
+
+rm -f /tmp/today
+ 

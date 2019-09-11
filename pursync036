@@ -1,0 +1,130 @@
+#!/bin/bash
+#
+[ -f /DSOP/DTAB/EH_P2K_TOTAL -o -f /DSOP/DTAB/EH_HYDRA ] && exit 0
+export TERM=vt100
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+. /etc/profile.d/tz.sh >/dev/null 2>&1
+set -x
+nlog="/DSOP/DLOG/`basename $0`.log"
+
+LOJA=`hostname | cut -c6-`
+WAIT=$(echo "$RANDOM % 31" |bc)
+#
+#
+
+#
+#
+
+#case $LOJA in
+#061|080|253|273|361|398|364|490|254|074|1037|1039|1111) ## Apenas lojas do MA
+#045|061|074|080|103|147|187|218|253|254|273|303|361|364|377|387|398|435|475|490|603|622|624|683|690|714|934|942|1015|1032|1037|1039|1072|1111|1112|1115) ## Lojas ES e MA a partir de 12/2014
+#045|061|074|080|103|147|187|218|253|254|273|303|328|361|364|377|387|398|435|475|490|494|603|622|624|683|690|714|934|942|1007|1011|1015|1032|1037|1039|1072|1111|1112|1115|1120|1125|1172|1190|1191|1195|1199|1217|1223|1228|1230) ## Lojas ES, MA e PI a partir de 08/2015
+case ${UF} in
+ES|MA|PI|TO)
+
+[ `echo $LOJA | wc -c` -eq 4 ] && LOJA=0${LOJA}
+
+cd /lasa/pdvs/sefaz
+if [ "`pwd`" = "/lasa/pdvs/sefaz" ]
+then
+	find . -maxdepth 1 -name "??????????????*.txt" -type f | \
+	while read arquivo
+	do
+		NCNPJ=`head -1 ${arquivo} | cut -c3-16`
+		[ "${LOJA}" = "0045" ] && NCNPJ="33014556004698"
+		[ "${LOJA}" = "0061" ] && NCNPJ="33014556000139"
+		[ "${LOJA}" = "0074" ] && NCNPJ="33014556079949"
+		[ "${LOJA}" = "0080" ] && NCNPJ="33014556078624"
+		[ "${LOJA}" = "0103" ] && NCNPJ="33014556014901"
+		[ "${LOJA}" = "0147" ] && NCNPJ="33014556076508"
+		[ "${LOJA}" = "0187" ] && NCNPJ="33014556019610"
+		[ "${LOJA}" = "0218" ] && NCNPJ="33014556086996"
+		[ "${LOJA}" = "0253" ] && NCNPJ="33014556031156"
+		[ "${LOJA}" = "0254" ] && NCNPJ="33014556080521"
+		[ "${LOJA}" = "0273" ] && NCNPJ="33014556031318"
+		[ "${LOJA}" = "0303" ] && NCNPJ="33014556049799"
+		[ "${LOJA}" = "0361" ] && NCNPJ="33014556056655"
+		[ "${LOJA}" = "0364" ] && NCNPJ="33014556057384"
+		[ "${LOJA}" = "0377" ] && NCNPJ="33014556058780"
+		[ "${LOJA}" = "0387" ] && NCNPJ="33014556049527"
+		[ "${LOJA}" = "0398" ] && NCNPJ="33014556056817"
+		[ "${LOJA}" = "0435" ] && NCNPJ="33014556067185"
+		[ "${LOJA}" = "0475" ] && NCNPJ="33014556069803"
+		[ "${LOJA}" = "0490" ] && NCNPJ="33014556077300"
+		[ "${LOJA}" = "0603" ] && NCNPJ="33014556069129"
+		[ "${LOJA}" = "0622" ] && NCNPJ="33014556072421"
+		[ "${LOJA}" = "0624" ] && NCNPJ="33014556075790"
+		[ "${LOJA}" = "0683" ] && NCNPJ="33014556096606"
+		[ "${LOJA}" = "0690" ] && NCNPJ="33014556098145"
+		[ "${LOJA}" = "0714" ] && NCNPJ="33014556108043"
+		[ "${LOJA}" = "0934" ] && NCNPJ="33014556051181"
+		[ "${LOJA}" = "0942" ] && NCNPJ="33014556051009"
+		[ "${LOJA}" = "1015" ] && NCNPJ="33014556085833"
+		[ "${LOJA}" = "1032" ] && NCNPJ="33014556101383"
+		[ "${LOJA}" = "1037" ] && NCNPJ="33014556088182"
+		[ "${LOJA}" = "1039" ] && NCNPJ="33014556093771"
+		[ "${LOJA}" = "1072" ] && NCNPJ="33014556093500"
+		[ "${LOJA}" = "1111" ] && NCNPJ="33014556099460"
+		[ "${LOJA}" = "1112" ] && NCNPJ="33014556101464"
+		[ "${LOJA}" = "1115" ] && NCNPJ="33014556103912"
+
+		TAMARQUIVO=`basename $arquivo | cut -d. -f1 | wc -c`
+		INDICADOR=`echo "${TAMARQUIVO} - 6" | bc`
+		MESANO=`basename $arquivo | cut -d. -f1 | cut -c${INDICADOR}-`
+
+		[ ! -d /lasa/usr/COMNC/STATX/PAFECF/LOJA${LOJA}CNPJ${NCNPJ}/${MESANO} ] && mkdir -p /lasa/usr/COMNC/STATX/PAFECF/LOJA${LOJA}CNPJ${NCNPJ}/${MESANO}
+		rsync -v $arquivo /lasa/usr/COMNC/STATX/PAFECF/LOJA${LOJA}CNPJ${NCNPJ}/${MESANO}
+		[ $? -eq 0 ] && bzip2 ${arquivo}
+		chmod 777 /lasa/usr/COMNC/STATX/PAFECF/LOJA${LOJA}CNPJ${NCNPJ}/${MESANO}/${arquivo}
+	done
+
+fi
+
+#find /lasa/pdvs/sefaz -type f -maxdepth 1 -name "????????" | grep -v bz2 | while read arquivosefaz;do bzip2 -f ${arquivosefaz};done
+
+#find /lasa/pdvs/sefaz -type f -maxdepth 1 -name "????????.???" | grep -v bz2 | while read arquivosefaz;do bzip2 -f ${arquivosefaz};done
+
+/DSOP/RSYNC/pursyncput.dir PAFECF servidor_rsync -D >>${nlog} 2>&1
+
+;;
+*)
+:
+# 	find /lasa/pdvs/sefaz -type f -maxdepth 1 | grep -v bz2 | while read arquivosefaz;do bzip2 -f ${arquivosefaz};done
+
+;;
+esac
+
+#
+#
+
+[ ! -d /lasa/usr/COMNC/STATX/CTRSEFAZ ] && mkdir -p /lasa/usr/COMNC/STATX/CTRSEFAZ
+#find /lasa/pdvs/sefaz -type f -maxdepth 1 -mtime +30 -name "*bz2" | \
+find /lasa/pdvs/sefaz -type f -maxdepth 1 -mtime +2 | \
+while read DDarquivo
+do
+	UUDDarquivo=`basename ${DDarquivo}`
+	mv ${DDarquivo} /lasa/usr/COMNC/STATX/CTRSEFAZ/${UUDDarquivo}
+	bzip2 -f /lasa/usr/COMNC/STATX/CTRSEFAZ/${UUDDarquivo}
+
+done
+
+find /lasa/usr/COMNC/STATX/CTRSEFAZ -type f | grep -v "bz2$" | \
+while read DDcomp
+do
+	bzip2 -f ${DDcomp}
+done
+
+chmod -R 777 /lasa/usr/COMNC/STATX/CTRSEFAZ
+
+#
+#
+
+DATA=`date +%y%m%d`
+
+NIP=`grep ^1: $TABELAS/servidor_central_sefaz | cut -d: -f2`
+
+DIRETORIO=`grep ^CTRSEFAZ: $TABELAS/service_rsync_lasa | cut -d: -f3 | sed "s/@@@/${LOJA}/" | sed "s/YYMMDD/${DATA}/"`
+
+ssh ${NIP} "mkdir -p ${DIRETORIO}"
+sleep ${WAIT}
+/DSOP/RSYNC/pursyncput CTRSEFAZ servidor_central_sefaz -S >>${nlog} 2>&1

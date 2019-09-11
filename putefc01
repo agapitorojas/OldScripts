@@ -1,0 +1,33 @@
+TERM=vt100
+export TERM
+
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+limpa_mem(){
+ipcs -a | grep wilbor | \
+while read linha
+do
+	set $linha
+	ipcrm -s $2
+done
+}
+
+ps -ef | grep conector | grep -v grep | \
+while read linha
+do
+        set $linha
+        kill -9 $2 >/dev/null 2>&1
+done
+
+limpa_mem
+
+sleep 2
+
+cd $CONCENTRADOR/conector/log
+[ -s conector.err ] && mv conector.err conector.err.`date +%Y%m%d%H%M%S`
+
+cd $CONCENTRADOR/conector/bin
+su wilbor -c "cd /lasa/pdvs/dados/conector/bin;./conector >/dev/null 2>&1"
+
+limpa_mem
+

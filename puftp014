@@ -1,0 +1,44 @@
+#!/bin/bash
+<<HEADER
+	Script de coleta de arquivos do Marketplace para o Flash
+	Autor: Agapito Rojas (agapito.rojas@lasa.com.br)
+
+	Versao 1.0 (02/03/2018)
+HEADER
+
+BASE=$(basename $0) ## Nome do script
+LOG="/DSOP/DLOG/${BASE%%.*}.log" ## Arquivos de log
+PIDFILE="/DSOP/DLOG/${BASE%%.*}.pid" ## Arquivo de PID
+
+function verifica_pid {
+	if [ -s ${PIDFILE} ]; then
+		LASTPID=$(cat ${PIDFILE})
+		if [ -d /proc/${LASTPID} ]; then
+			echo "$(date '+%F - %T') - Processo em execucao" >>${LOG} 2>&1
+			exit 0
+		else
+			echo $$ >${PIDFILE}
+		fi
+	else
+		echo $$ >${PIDFILE}
+	fi
+}
+
+verifica_pid
+
+if [ $(ssh -o ConnectTimeout=15 lasaftp2 "ls /lasa/home/mktplaceflash/put/tosrv.*.gz 2>/dev/null |wc -l") -gt 0 ]; then
+	echo -e "Início $(date '+%F - %T')\n" >>${LOG} 2>&1
+	rsync -av --timeout=30 --remove-sent-files lasaftp2:/lasa/home/mktplaceflash/put/tosrv.*.gz /lasa/usr/PRODUCAO/COMNC/STARX/VENDAS >>${LOG} 2>&1
+	if [ "$?" -eq "0" ]; then
+		echo -e "\nFim $(date '+%F - %T')\n" >>${LOG} 2>&1
+	else
+		echo -e "Erro $? ao enviar os arquivos $(date '+%F - %T')\n" >>${LOG} 2>&1
+	fi
+elif [ "$?" -eq "0" ]; then
+	echo -e "Sem arquivos para transmitir $(date '+%F - %T')\n" >>${LOG} 2>&1
+elif [ "$?" -ne "0" ]; then
+	echo -e "Erro ${ERRO} ao acessar LASAFTP2 $(date '+%F - %T')\n" >>${LOG} 2>&1
+fi
+
+rm -f ${PIDFILE}
+#Fim do script

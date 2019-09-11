@@ -1,0 +1,100 @@
+
+TERM=vt100
+export TERM
+
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+pela_cron=$1
+
+loja=`hostname | cut -c6-8`
+
+#
+# 	executa conforme horario de BRASILIA
+#
+
+data=`date +%Y%m%d`
+horas=`date +%H`
+
+
+acertado=0
+if [ -s /opt/SMA/conf/horario_verao ]
+then
+     data_inicio_hr_verao=`tail -1 /opt/SMA/conf/horario_verao | grep -v "^#" | cut -d":" -f1`
+     data_fim_hr_verao=`tail -1 /opt/SMA/conf/horario_verao | grep -v "^#" | cut -d":" -f2`
+     [ `echo $data_inicio_hr_verao | wc -c` -ne 9 ] && data_inicio_hr_verao="88888888"
+     [ `echo $data_fim_hr_verao | wc -c` -ne 9 ] && data_fim_hr_verao="99999999"
+
+     if [ $data -ge $data_inicio_hr_verao -a $data -le $data_fim_hr_verao ]
+     then
+	if grep "^${LOJA}" /opt/SMA/conf/loja_sem_hora_verao >/dev/null 2>&1
+	then
+		TZ=GMT+1 export TZ
+		horas=`date +%H`
+		TZ=Brazil/East export TZ
+
+		if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+		then
+			TZ=GMT+0 export TZ
+			horas=`date +%H`
+			TZ=Brazil/East export TZ
+			acertado=1
+		fi
+	else
+		if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+		then
+			TZ=GMT+1 export TZ
+			horas=`date +%H`	
+			TZ=Brazil/East export TZ
+			acertado=1
+		fi
+	
+	fi
+     fi
+fi
+
+if [ $acertado -eq 0 ]
+then
+if grep "^${loja}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+then
+		TZ=GMT+2 export TZ
+		horas=`date +%H`
+		TZ=Brazil/East export TZ
+fi
+fi
+
+if [ "$pela_cron" = "-n" ]
+then
+	[ $horas -ne 2 ] && exit 0
+fi
+
+#
+#cd $CONCENTRADOR/conector/log
+#cp conector.err conector.err.`date +%Y%m%d%H%M%S`
+
+#su wilbor -c "$CONCENTRADOR/conector/bin/fim"
+
+echo "99999" >$LOG/qtde_erros_putefc04
+
+ps -ef | grep conector | grep -vE "atualiza|grep" | \
+while read linha
+do
+	set $linha
+	kill -9 $2 >/dev/null 2>&1
+done
+
+
+sleep 5
+
+tem_putef=`ps -ef | grep putefc01 | grep -v grep | wc -l`
+tem_conector=`ps -ef | grep conector | grep -vE "atualiza|grep" | wc -l`
+
+if [ $tem_putef -gt 0 -a $tem_conector -eq 0 ]
+then
+	ps -ef | grep putefc01 | grep -v grep | \
+	while read linha
+	do
+		set $linha
+		kill -9 $2
+	done
+fi
+

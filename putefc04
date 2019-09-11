@@ -1,0 +1,158 @@
+export TERM=vt100
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+case `hostname` in
+vn01_666|vn01_999|vn06_013|vn05_888|vn05_054)
+        exit 0
+        ;;
+esac
+
+log=$CONCENTRADOR/conector/log/conector.err
+
+[ ! -s $log ] && exit 0
+
+loja=`hostname | cut -c6-8`
+servidor=`hostname`
+
+#
+# 	executa conforme horario de BRASILIA
+#
+
+data=`date +%Y%m%d`
+horas=`date +%H`
+
+acertado=0
+if [ -s /opt/SMA/conf/horario_verao ]
+then
+     data_inicio_hr_verao=`tail -1 /opt/SMA/conf/horario_verao | grep -v "^#" | cut -d":" -f1`
+     data_fim_hr_verao=`tail -1 /opt/SMA/conf/horario_verao | grep -v "^#" | cut -d":" -f2`
+     [ `echo $data_inicio_hr_verao | wc -c` -ne 9 ] && data_inicio_hr_verao="88888888"
+     [ `echo $data_fim_hr_verao | wc -c` -ne 9 ] && data_fim_hr_verao="99999999"
+
+     if [ $data -ge $data_inicio_hr_verao -a $data -le $data_fim_hr_verao ]
+     then
+	if grep "^${LOJA}" /opt/SMA/conf/loja_sem_hora_verao >/dev/null 2>&1
+	then
+		TZ=GMT+1 export TZ
+		horas=`date +%H`
+		TZ=Brazil/East export TZ
+
+		if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+		then
+			TZ=GMT+0 export TZ
+			horas=`date +%H`
+			TZ=Brazil/East export TZ
+			acertado=1
+		fi
+	else
+		if grep "^${LOJA}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+		then
+			TZ=GMT+1 export TZ
+			horas=`date +%H`
+			TZ=Brazil/East export TZ
+			acertado=1
+		fi
+	
+	fi
+     fi
+fi
+
+
+if [ $acertado -eq 0 ]
+then
+if grep "^${loja}" /opt/SMA/conf/loja_fuso_menos_1 >/dev/null 2>&1
+then
+		TZ=GMT+2 export TZ
+		horas=`date +%H`
+		TZ=Brazil/East export TZ
+fi
+fi
+
+[ $horas -eq 1 -o $horas -eq 2 ] && exit 0
+
+#
+#	verifica conexao conector
+#
+
+	info=`/DSOP/DEXE/putefc05`
+	iptefc=`echo ${info} | cut -d: -f1`
+	tipo=`echo ${info} | cut -d: -f2`
+
+#
+# 	Verifica ultimo chamado
+#
+
+horas_dia=`date +%H`
+dia_atual=`date +%d`
+minutos_now=`date +%M`
+minutos_dia=`echo "(${horas_dia} * 60) + ${minutos_now}" | bc`
+
+if [ -s $LOG/putefc04_ultimo_alerta ]
+then
+	_ultimo_chamado=`tail -1 $LOG/putefc04_ultimo_alerta | cut -d: -f1`
+	_dia=`tail -1 $LOG/putefc04_ultimo_alerta | cut -d: -f2`
+	prx_chamado=`echo "${_ultimo_chamado} + 30" | bc`
+	[ ${_dia} -ne ${dia_atual} ] && prx_chamado=0
+	[ $prx_chamado -ge 1440 ] && prx_chamado=`echo "${prx_chamado} - 1440" | bc`
+else
+	prx_chamado=0
+fi
+
+#
+#
+
+numerratual=`grep -iE "erro em |ERR NET_send: erro|ERR NET_receive: erro" ${log} | grep -vi ping_ctf | wc -l`
+
+prearq=`date +%Y%m%d`
+monatual=`find $CONCENTRADOR/conector/mon -name "${prearq}*" | wc -l`
+
+if [ ${minutos_dia} -le ${prx_chamado} ]
+then
+	echo ${numerratual} >$LOG/qtde_erros_putefc04
+	echo ${monatual} >$LOG/qtde_mon_putefc04
+	exit 0
+fi
+
+#
+#
+
+   erro=0
+   if [ -s $LOG/qtde_erros_putefc04 ]
+   then
+	numerrold=`cat $LOG/qtde_erros_putefc04`
+	if [ $numerratual -gt $numerrold ]
+	then
+
+		#
+
+		ASSUNTO="${iptefc} : TEF com ERRO para a loja "
+		MSG="${loja} ${iptefc} ${tipo}"
+		ACAO=""
+		/opt/SMA/cmds/tefcmailmon "${ASSUNTO}" "${MSG}" "${ACAO}"
+		echo "${minutos_dia}:${dia_atual}" >$LOG/putefc04_ultimo_alerta
+		erro=1
+	fi	
+   fi
+
+   #
+   #
+   #
+ 
+   if [ -s $LOG/qtde_mon_putefc04 -a $erro -eq 0 ]
+   then
+	monold=`cat $LOG/qtde_mon_putefc04`
+	if [ $monatual -gt $monold ]
+	then
+
+		ASSUNTO="${iptefc} : TEF com DESCONEXAO para a loja "
+		MSG="${loja} ${iptefc} ${tipo}"
+		ACAO=""
+		/opt/SMA/cmds/tefcmailmon "${ASSUNTO}" "${MSG}" "${ACAO}"
+		echo "${minutos_dia}:${dia_atual}" >$LOG/putefc04_ultimo_alerta
+	fi	
+   fi
+
+echo ${numerratual} >$LOG/qtde_erros_putefc04
+echo ${monatual} >$LOG/qtde_mon_putefc04
+
+#

@@ -1,0 +1,337 @@
+###################################################
+# Script para executar carga de vendas BB 
+#
+################################################### 
+
+#Inicio
+#set -x
+
+export TERM=vt320
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+LOJA=`hostname | cut -c6-`
+
+log=/DSOP/DLOG/`basename $0`.log
+
+if [ ! -s $TABELAS/EH_BB_CENTRAL -a ! -s $TABELAS/EH_CPF_CENTRAL \
+     -a ! -s $TABELAS/EH_BB_DESCENTRAL ] 
+then
+	pusopo34 "Nao eh BLOCK nem CPF" ${log}
+	exit 0
+fi
+
+VARTIPOLOJA=NA
+[ -s $TABELAS/EH_BB_CENTRAL ] && VARTIPOLOJA="BBCENTRAL"
+[ -s $TABELAS/EH_CPF_CENTRAL ] && VARTIPOLOJA="BBCPF"
+[ -s $TABELAS/EH_BB_DESCENTRAL ] && VARTIPOLOJA="BBDESCENTRAL"
+
+umask 00
+
+COBSW=-F
+export COBSW
+
+COBDIR=/opt/microfocus/cobol/
+export COBDIR
+
+LIBPATH=$COBDIR/lib:$LIBPATH:/usr/lib
+export LIBPATH
+
+TERM=vt100
+export TERM
+
+#
+
+
+CONTROLE=$$
+
+remove_pid(){
+	pusopo34 "Removendo $LOG/pubbvda02.pid : `cat $LOG/pubbvda02.pid`" $log
+	rm -f $LOG/pubbvda02.pid
+}
+
+pusopo34 "INICIO ${*} - $CONTROLE" $log
+
+#
+
+#
+
+PROC=$1
+[ "${PROC}" = "" ] && PROC="ALL"
+
+#
+
+DATACONTROL=`date +%Y%m%d%H`
+CTGDATA=`date +%Y%m%d`
+
+#
+# caso tenha processo ja rodando, mas o arquivos pubbvda02.pid nao existe
+# entao cria ele
+#
+
+HORAPROCRODANDO=`ps -ef | grep -E "sup01480|gera_imagfilme.bb.php|gera_imagprom.bb.php|gera_imagmovie.bb.php|gera_imagcli.bb.php|pubbvda02" | grep -vE "$$|grep" | awk '{print ($5)}' | cut -d : -f1 | sort | head -1`
+[ "${HORAPROCRODANDO}" = "" ] && HORAPROCRODANDO=-1
+
+[ `echo $HORAPROCRODANDO | wc -c` -eq 2 ] && HORAPROCRODANDO=0${HORAPROCRODANDO}
+
+[ ! -s $LOG/pubbvda02.pid -a $HORAPROCRODANDO -gt 0 ] && echo "${CTGDATA}${HORAPROCRODANDO}"
+
+#
+#
+
+if [ -s $LOG/pubbvda02.pid ]
+then
+	CONTPID=`cat $LOG/pubbvda02.pid`
+	[ "${CONTPID}" = "" ] && rm -f $LOG/pubbvda02.pid
+	[ "${CONTPID}" = "" ] && CONTPID=0
+
+	DATALIMITE=`echo "${CONTPID} + 1" | bc`
+
+	if [ ${DATACONTROL} -ge ${DATALIMITE} ]
+	then
+		ps -ef | grep -E "sup01480|gera_imagfilme.bb.php|gera_imagprom.bb.php|gera_imagmovie.bb.php|gera_imagcli.bb.php|pubbvda02" | grep -vE "$$|grep" | \
+		while read proclinha
+		do
+			set $proclinha
+			pusopo34 "Matando : ${proclinha}" $log
+			kill -9 $2 >>$log 2>&1
+		done
+		sleep 10
+		remove_pid
+	fi
+fi
+
+#
+# verifica se tem processo ja rodando
+#
+
+if [ -s $LOG/pubbvda02.pid ]
+then
+	ps -ef | grep -E "gera_imagfilme.bb.php|gera_imagprom.bb.php|gera_imagmovie.bb.php|gera_imagcli.bb.php|pubbvda02|sup01480" | grep -vE "$$|grep" >>$log
+	ls -l $LOG/pubbvda02.pid >>$log
+	pusopo34 "FIM - Ja existe processo pubbvda02 rodando - $CONTROLE" $log
+	exit 0
+fi
+ 
+if [ `ps -ef | grep -E "sup01480|gera_imagfilme.bb.php|gera_imagprom.bb.php|gera_imagmovie.bb.php|gera_imagcli.bb.php" |  grep -vE "$$|grep" | wc -l` -gt 0 ]
+then
+	ps -ef | grep -E "pubbvda02|gera_imagfilme.bb.php|gera_imagprom.bb.php|gera_imagmovie.bb.php|gera_imagcli.bb.php|sup01480" | grep -vE "$$|grep" >>$log
+	pusopo34 "FIM - Ja existe processo pubbvda02 rodando - $CONTROLE" $log
+	exit 0
+fi
+
+#
+#
+#
+
+echo ${DATACONTROL} > $LOG/pubbvda02.pid
+pusopo34 "Criando $LOG/pubbvda02.pid : `cat $LOG/pubbvda02.pid`" $log
+
+#
+
+PROC=`echo $PROC | dd conv=ucase 2>/dev/null`
+
+cd /DSOP/PHP/cron/por_dia 
+
+pusopo34 "Iniciando procedimento ${PROC} - $CONTROLE" $log
+
+case ${PROC} in
+IMAGCLI) PRGR=gera_imagcli.bb.php ;;
+IMAGFILME) PRGR=gera_imagfilme.bb.php ;;
+IMAGMOVIE) PRGR=gera_imagmovie.bb.php ;;
+IMAGPROM) PRGR=gera_imagprom.bb.php ;;
+ALL|INTELIGENTE) PRGR="gera_imagfilme.bb.php gera_imagmovie.bb.php gera_imagprom.bb.php gera_imagcli.bb.php" ;;
+*) pusopo34 "ERRO - Procedimento ${PROC} desconhecido. - $CONTROLE" $log
+   remove_pid
+   exit 0
+   ;;   
+esac
+
+#
+
+DATAHOJE=`date +%b" "%e`
+
+ontem=`date +%d --date='yesterday'`
+
+dir="/lasa1/pdvs/dados/bk${ontem}"
+
+#
+#
+
+tempo=`echo "$RANDOM % 300" | bc`
+[ "`echo $LOGNAME | cut -c1-4`" != "oper" ] && sleep $tempo
+
+#
+
+LE_ARQUIVOS=""
+
+for PROGRAMA in ${PRGR}
+do
+   ERRO=0
+
+   VAI_EXECUTA=1
+
+   case $PROGRAMA in
+   gera_imagfilme.bb.php) ARQBB=IMAGFILME.bb
+			  [ -s $TABELAS/EH_CPF_CENTRAL ] && VAI_EXECUTA=0 ;;
+   gera_imagmovie.bb.php) ARQBB=IMAGMOVIE.bb 
+			  [ -s $TABELAS/EH_CPF_CENTRAL ] && VAI_EXECUTA=0 ;;
+   gera_imagprom.bb.php)  ARQBB=IMAGPROM.bb 
+			  [ -s $TABELAS/EH_CPF_CENTRAL ] && VAI_EXECUTA=0 ;;
+   gera_imagcli.bb.php)   ARQBB=IMAGCLI.bb ;;
+   *) pusopo34 "ERRO - Arquivo nao identificado - $CONTROLE" $log
+      pusopo34 "Programa ${PROGRAMA} nao executado - $CONTROLE" $log
+      ERRO=1
+      continue
+      ;;
+   esac      
+
+#
+# Se loja so usa base centralizada para cadastro de CPF
+# entao soh roda IMAGCLI
+
+if [ $VAI_EXECUTA -eq 0 ]
+then
+	pusopo34 "Programa ${PROGRAMA} nao executado - CPF - $CONTROLE" $log
+	continue
+fi
+
+#
+
+
+#
+# Se PROC = INTELIGENTE soh roda se arquivo nao existir
+#
+  
+ if [ "$PROC" = "INTELIGENTE" ]
+ then 
+   if [ `ls -l ${dir}/${ARQBB} 2>/dev/null | grep " ${DATAHOJE} " | grep -v " 0 ${DATAHOJE} " | wc -l` -eq 1 ]
+   then
+	ls -l ${dir}/${ARQBB} >>$log
+	pusopo34 "Arquivo ${dir}/${ARQBB} ja existe. Programa ${PROGRAMA} nao executado - $CONTROLE" $log
+	continue
+   fi
+ fi
+
+#
+#
+
+   cd /DSOP/PHP/cron/por_dia
+   if [ -f ${PROGRAMA} ]
+   then
+        pusopo34 "Execucao ${PROGRAMA} - $CONTROLE" $log
+
+        echo "LEITURA ${ARQBB} " >> /lasa/leitura_image.log
+
+	echo "====== INICIO `date +%Y%m%d%H%M%S`" >/tmp/image.${ARQBB}.$$
+        ./${PROGRAMA}  >>/tmp/image.${ARQBB}.$$ 2>&1
+	echo "====== FINAL  `date +%Y%m%d%H%M%S`" >>/tmp/image.${ARQBB}.$$
+
+	cat /tmp/image.${ARQBB}.$$ >>/lasa/leitura_image.log
+
+	# se houve falha de conexao, tenta de novo apos X segundos
+
+    	if [ `grep "FATAL:  connection limit exceeded for non-superusers" /tmp/image.${ARQBB}.$$ | wc -l` -gt 0 ]
+	then
+
+		[ "`echo $LOGNAME | cut -c1-4`" != "oper" ] && sleep 120
+
+		echo "====== REINICIO `date +%Y%m%d%H%M%S`" >/tmp/image.${ARQBB}.$$
+        	./${PROGRAMA}  >>/tmp/image.${ARQBB}.$$ 2>&1
+		echo "====== FINAL  `date +%Y%m%d%H%M%S`" >>/tmp/image.${ARQBB}.$$
+		cat /tmp/image.${ARQBB}.$$ >>/lasa/leitura_image.log
+	fi
+
+	#
+
+	LE_ARQUIVOS="${LE_ARQUIVOS} ${ARQBB}"
+
+    	pusopo34 "Fim execucao ${PROGRAMA} - $CONTROLE" $log	
+   else
+        pusopo34 "ERRO - Programa ${PROGRAMA} nao encontrado - $CONTROLE" $log
+   fi
+
+done 
+
+#
+
+#
+# Execucao programa COBOL
+#
+
+if [ -d /lasa/pdvs/dados ]
+then
+   pusopo34 "Inicio execucao sup01480 - $CONTROLE" $log
+   cd $CONCENTRADOR
+
+   [ -s GCHIST10 ] && mv GCHIST10 GCHIST10.`date +%a`
+   [ -s GCHIST10.idx ] && mv GCHIST10.idx GCHIST10.idx.`date +%a`
+
+   for i in `ls /lasa/usr/COMNC/STARX/BLOCKBUSTER/IMAG* 2>/dev/null`
+   do
+	XXnarq=`basename $i`
+	BACKarq="`date +%Y%m%d%H%M%S`.${XXnarq}"
+	cp ${i} /lasa/usr/COMNC/STARX/BLOCKBUSTER/${BACKarq}
+   done
+   if [ -s exec/sup01480 ]
+   then
+
+   ./exec/sup01480
+   if [ $? -eq 0 ]
+   then
+	chmod 777 rtital*
+	chmod 777 rtclal*
+	chmod 777 rtmvps*
+	chmod 777 rtproa*
+	pusopo34 "FIM execucao sup01480 - Sucesso - $CONTROLE" $log
+   else
+	pusopo34 "ERRO na execucao sup01480 - $CONTROLE" $log
+   fi
+
+   else
+	pusopo34 "ERRO - nao existe sup01480 - $CONTROLE" $log	
+   fi
+
+   # 
+   # Verifica se arquivos foram criados
+   #
+
+   for VENDO_ARQ in $LE_ARQUIVOS
+   do
+	JJDATA=`date +%Y%m%d`
+	JJHORA=`date +%H":"%M":"%S`
+
+	if [ `ls -l ${dir}/${VENDO_ARQ} 2>/dev/null | grep " ${DATAHOJE} " | grep -v " 0 ${DATAHOJE} " | wc -l` -eq 0 ]
+       then
+
+	  if [ `grep -E "POSTGRE Erro|PHP Warning" /tmp/image.${VENDO_ARQ}.$$ | grep -v timezone | wc -l` -gt 0 ]
+	  then
+		RRerro="ERROPHP"
+	  else
+		RRerro="ERROCOBOL"
+	  fi
+
+	  rm -f /tmp/image.${VENDO_ARQ}.$$
+
+	  echo "${LOJA},${RRerro},${VARTIPOLOJA},${VENDO_ARQ},${JJDATA},${JJHORA}" >$VARSTAT/imagbb.${LOJA}.${VENDO_ARQ}.${JJDATA}
+	  pusopo34 "Arquivo ${dir}/${VENDO_ARQ} nao foi criado.- ${RRerro} - $CONTROLE" $log
+	else
+ 
+	  echo "${LOJA},OK,${VARTIPOLOJA},${VENDO_ARQ},${JJDATA},${JJHORA}" >$VARSTAT/imagbb.${LOJA}.${VENDO_ARQ}.${JJDATA}
+	  pusopo34 "Arquivo ${dir}/${VENDO_ARQ} criado com sucesso. - $CONTROLE" $log
+
+	fi
+   done
+
+   #
+
+else
+	pusopo34 "ERRO Diretorio /lasa/pdvs/dados nao existe !!! - $CONTROLE" $log
+fi
+
+
+remove_pid
+
+pusopo34 "Processo FINALIZADO - $CONTROLE" $log
+
+#Fim
+

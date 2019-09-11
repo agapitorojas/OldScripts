@@ -1,0 +1,38 @@
+export TERM=vt100
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+loja=`hostname | cut -c6-8`
+servidor=`hostname`
+
+#
+#	verifica conexao conector
+#
+
+	if [ `netstat -anp | grep -E "conector|:1996 " | grep ESTABLISHED | wc -l` -gt 0 ]
+	then
+		set `netstat -anp | grep -E "conector|:1996 " | grep ESTABLISHED | tail -1`
+		niptefc=`echo $5 | cut -d: -f1`
+		status="COMM"
+	else
+
+	   status="NOTCOMM"
+	   if [ `grep "^IPCTF:" $CONCENTRADOR/conector/dad/conector.dat 2>/dev/null | wc -l` -eq 1 ]
+	   then
+		niptefc=`grep "^IPCTF:" $CONCENTRADOR/conector/dad/conector.dat | cut -d: -f2`
+	   else
+		niptefc="NA"
+	   fi
+	fi
+#
+
+nippri=`grep "^IPCTF:" $CONCENTRADOR/conector/dad/conector.dat | cut -d: -f2 | tr -d " "`
+nipsec=`grep "^IPCTFSECUNDARIO:" $CONCENTRADOR/conector/dad/conector.dat | cut -d: -f2 | tr -d " "`
+
+tiponip="N"
+[ "${niptefc}" = "${nippri}" ] && tiponip="P"
+[ "${niptefc}" = "${nipsec}" ] && tiponip="S"
+[ "${tiponip}" != "N" -a "${nippri}" = "${nipsec}" ] && tiponip="P"
+
+echo "${niptefc}:${tiponip}:${status}:${nippri}:${nipsec}"
+
+

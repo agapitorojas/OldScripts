@@ -1,0 +1,86 @@
+#************************************************************************
+#                  LOJAS AMERICANAS S. A.                               *
+#************************************************************************
+#                                                                       *
+#     PROG.     -  pusopo78.sh                                          *
+#     TIPO      -  P                                                    *
+#     SISTEMA   -  SOP                                                  *
+#     SUBSIST.  -  O                                                    *
+#     SINTAXE   -  pusopo78                                             *
+#                                                                       *
+#                                                                       *
+#     AUTOR     -  Wagner Prado - LASA                                  *
+#     DATA      -  11.Jul.01                                            *
+#     ALT. POR  -  Felipe Motta - Allen                                 *
+#     DATA      -  11.Out.16                                            *
+#     ALT. POR  -  Agápito Rojas - HITSS                                *
+#     DATA      -  05.Dez.18                                            *
+#                                                                       *
+#************************************************************************
+trap "" 2 3 15
+set -ah
+set +fu
+
+log=$LOG/SUSOPO_OUT78
+tipo=$1
+interac=$2
+inicializa=$3
+kernel=`uname -r | cut -c1-3`
+
+limpa_logs(){
+   if [ -e /DSOP/DTAB/EH_PCK_NOVO -a "$kernel" != "2.4" ]; then
+      find /lasa/gescom/pdvs/dados/pck-srv/log -maxdepth 1 -type f \( -name 'pck-srv*.tmp' -o -name 'pck-srv*.zip' \) -mtime +7 -exec rm -f {} \; >/dev/null 2>&1
+   fi
+}
+
+para_servico(){
+   [ "$interac" = "-n" ] || pusopo40 "Desativando processo do Posto de Consulta. Aguarde..."
+   pusopo34 "Desativando Posto de Consulta" $log
+   /DSOP/DEXE/pusomk01 stop >/dev/null 2>&1
+   /etc/init.d/linx-pck-srv stop >/dev/null 2>&1
+   #Mata tudos os processos referentes a terminal de consulta
+   processo_mk=`ps aux | grep -E "price-checker-server.jar|pck-srv.jar|linx-pck-srv|gateway 16009|gsprcl01 16009" | grep -v grep | awk '{print $2}'`
+   if [ `echo $processo_mk | wc -w` -gt 0 ]
+   then
+      kill -9 $processo_mk
+      sleep 3
+   fi
+   [ "$interac" = "-n" ] || pusopo14 "Processo Desativado. Tecle <entra>..."
+   limpa_logs
+}
+
+inicia_servico(){
+   [ "$interac" = "-n" ] || pusopo40 "Ativando processo do Posto de Consulta. Aguarde..."
+   pusopo34 "Ativando Posto de Consulta" $log
+   if [ -e /DSOP/DTAB/EH_PCK_NOVO -a "$kernel" != "2.4" ]
+   then
+      /etc/init.d/mk_500_1000_3000_prisma_p2k
+      pusopo34 "Ativando Servico Novo" $log
+   elif [ -s /DSOP/DTAB/EH_P2K_TOTAL ]
+   then
+      /etc/init.d/linx-pck-srv start ${inicializa} >/dev/null 2>&1
+      pusopo34 "Ativando Servico Antigo P2K" $log
+   else
+      /DSOP/DEXE/pusomk01 start ${inicializa} >/dev/null 2>&1
+      /etc/init.d/mk3000 >/dev/null 2>&1
+      pusopo34 "Ativando Servico Antigo Prisma" $log
+   fi
+   [ "$interac" = "-n" ] || pusopo14 "Processo Ativado. Tecle <entra>..."
+}
+
+############################################################################################
+
+[ "$interac" = "-n" ] || pusopo32
+
+loja=`hostname | cut -c6-`
+
+case $tipo in
+start)
+   inicia_servico
+;;
+
+stop)
+   para_servico
+;;
+
+esac

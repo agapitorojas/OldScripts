@@ -1,0 +1,214 @@
+##############################################
+# puvdacup002a
+#
+##############################################
+
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+#set -x
+
+VARSTAT=/P2K/P2K_CTRL/CUPONS
+[ ! -d $VARSTAT ] && mkdir -p $VARSTAT 
+export novodir=$VARSTAT/LXCUPOM
+[ ! -d $novodir ] && mkdir -p $novodir
+
+ZIP="/bin/gzip"
+
+##
+##
+
+LOGDT=`date +%Y%m%d`
+LOGDTHR=`date +%Y%m%d%H%M%S`
+log=/DSOP/DLOG/pup2kvdacup002.${LOGDT}.log
+
+	ps -ef | grep pup2kvdacup002 | grep -vE "tail|pg|grep|vi"  >>${log}		
+if [ `ps -ef | grep pup2kvdacup002 | grep -vE "tail|pg|grep|vi" | wc -l` -gt 3 ]
+then
+	ps -ef | grep pup2kvda002 | grep -vE "tail|pg|grep|vi"  >>${log}		
+	echo "${LOGDTHR} : Ja existe processo rodando" >>${log}
+	exit 0
+fi
+
+echo "${LOGDTHR} : INICIO" >>${log}
+
+
+[ ! -d /P2K ] && exit 0
+
+ARQS="arq_cup_canc_bcup.txt
+arq_fech_cup_bcup.txt
+arq_ite_canc_bcup.txt
+arq_itemcanc_bcup.txt
+vendas_bcup.txt
+meio_pagamento_bcup.txt
+arq_servicos_bcup.txt"
+
+for DIRloja in `ls -d /P2K/EP/LJ???? 2>/dev/null`
+do
+	NOMEloja=`basename $DIRloja`
+	loja=`echo $NOMEloja | cut -c3-`
+#	[ $loja -lt 1000 ] && loja=`echo $loja | cut -c2-`
+	
+	export dirtrab=$VARSTAT/${NOMEloja}/CUPONS
+	export DIRSAIDA=$dirtrab/SAIDA
+
+	[ ! -d $dirtrab ] && mkdir -p $dirtrab
+	[ ! -d $DIRSAIDA ] && mkdir -p $DIRSAIDA
+
+	dirp2k=${DIRloja}/Exportacao
+
+	[ ! -d /P2K/P2K_CTRL/FLASH_CUPOM/${NOMEloja} ] && mkdir -p /P2K/P2K_CTRL/FLASH_CUPOM/${NOMEloja}
+
+	#
+	# Trata arquivos 
+	# Copia arquivos , ja eliminando duplicidades, para area de trabalho
+	# Pega os arquivos gerados pelo P2K e coloca em DIRSAIDA, 
+	# sem duplicidades
+	#
+	
+
+	for tipoarq in ${ARQS}
+	do
+		>${DIRSAIDA}/${tipoarq}
+   		for arquivo in `ls ${dirp2k}/${tipoarq}.????????.?????? 2>/dev/null`
+   		do
+			nomearq=`basename ${arquivo}`
+echo $arquivo
+			cat ${arquivo} >>${DIRSAIDA}/${tipoarq}.$$
+			if [ $? -eq 0 ] 
+			then
+				mv ${arquivo} /P2K/P2K_CTRL/FLASH_CUPOM/${NOMEloja}/${nomearq}
+				echo "${LOGDTHR} : Arquivo tratado OK ${arquivo}" >>$log
+			else
+				echo "${LOGDTHR} : Arquivo tratado ERRO ${arquivo}" >>$log
+			fi
+   		done
+		if [ -s ${DIRSAIDA}/${tipoarq}.$$ ]
+		then
+			sort -T $dirtrab ${DIRSAIDA}/${tipoarq}.$$ | uniq >>${DIRSAIDA}/${tipoarq}
+			rm -f ${DIRSAIDA}/${tipoarq}.$$ 
+		fi
+	done
+
+#
+#
+
+
+   # vendas_bcup.txt ; Itens vendidos
+   # arq_fech_cup_bcup.txt ; Cupom Fechado
+   # arq_cup_canc_bcup.txt ; Cupom Cancelado
+   # arq_itemcanc_bcup.txt ; Item cancelado
+   # arq_crd_digi_bcup.txt ; Credito Digital
+
+for ARQ in arq_fech_cup_bcup.txt:cupf_ord_bcup:cupf_trans_bcup \
+    arq_cup_canc_bcup.txt:cupc_ord_bcup:cupc_trans_bcup \
+    arq_itemcanc_bcup.txt:ite_ord_itemcanc_bcup:ite_trans_itemcanc_bcup \
+    arq_crd_digi_bcup.txt:cupd_ord_bcup:cupd_trans_bcup \
+    vendas_bcup.txt:vendas_ord_bcup:tosrv_bcup \
+    meio_pagamento_bcup.txt:mpag_ord_bcup:mpag_ord \
+    arq_servicos_bcup.txt:serv_ord_bcup:serv_trans_bcup
+do
+
+	ORIGARQ=`echo $ARQ | cut -d: -f1`
+	ORDARQ=`echo $ARQ | cut -d: -f2`
+	SAIDAARQ=`echo $ARQ | cut -d: -f3`
+
+	[ ! -s $DIRSAIDA/${ORIGARQ} ] && continue
+
+   # ordena fechamentos para poder obter diferencas a frente
+
+   sort -T $dirtrab $DIRSAIDA/$ORIGARQ | uniq > $DIRSAIDA/${ORDARQ}.$loja
+
+   # se existe anterior compara , gerando a diferenca para envio
+
+   if [ -s $DIRSAIDA/${ORDARQ}.$loja.ant ]
+   then
+
+      # obtem diferencial das vendas geradas
+
+      comm -23 $DIRSAIDA/${ORDARQ}.$loja \
+        $DIRSAIDA/${ORDARQ}.$loja.ant > $DIRSAIDA/${SAIDAARQ}.$loja
+      C1ERRO=$?
+
+      if [ -s $DIRSAIDA/${SAIDAARQ}.$loja ] && [ $C1ERRO -eq 0 ]
+      then
+
+	    # salva diferenca para uso posterior
+
+	    cp $DIRSAIDA/${SAIDAARQ}.$loja $DIRSAIDA/_TMP_${SAIDAARQ}.$loja 
+
+	 	# compacta diferenca para envio 
+
+        $ZIP -f $DIRSAIDA/${SAIDAARQ}.$loja
+	    if [ $? -eq 0 ]
+	    then
+            	data=`date +%y%m%d%H%M%S`
+            	mv -f $DIRSAIDA/${SAIDAARQ}.$loja.gz \
+	        ${novodir}/${SAIDAARQ}.$loja.${data}.gz
+
+		echo "Arquivo gerado : ${SAIDAARQ}.$loja.${data}.gz" >>$log
+	    else
+		rm -f $DIRSAIDA/_TMP_${SAIDAARQ}.$loja $DIRSAIDA/${SAIDAARQ}.$loja
+	    fi
+      fi
+   else
+      if [ -s $DIRSAIDA/${ORDARQ}.$loja ]
+      then
+
+			# faz backup do arquivo gerado para uso posterior
+
+	 	    cp $DIRSAIDA/${ORDARQ}.$loja $DIRSAIDA/_TMP_${SAIDAARQ}.$loja
+
+			# compacta para envio
+
+         	$ZIP -f $DIRSAIDA/${ORDARQ}.$loja 
+		  	if [ $? -eq 0 ]
+			then
+    	 			data=`date +%y%m%d%H%M%S`
+				mv -f $DIRSAIDA/${ORDARQ}.$loja.gz \
+				      $novodir/${SAIDAARQ}.$loja.${data}.gz
+				echo "Arquivo gerado : ${SAIDAARQ}.$loja.${data}.gz" >>$log
+			else
+				rm -f $DIRSAIDA/_TMP_${SAIDAARQ}.$loja $DIRSAIDA/${ORDARQ}.$loja
+			fi
+      fi
+   fi
+
+   # Salva diferenca no arquivo ANTERIOR
+
+   if [ -s $DIRSAIDA/_TMP_${SAIDAARQ}.$loja ]
+   then
+	cat $DIRSAIDA/_TMP_${SAIDAARQ}.$loja >> $DIRSAIDA/${ORDARQ}.$loja.ant
+	rm -f $DIRSAIDA/_TMP_${SAIDAARQ}.$loja
+	sort -T $dirtrab -o $DIRSAIDA/${ORDARQ}.$loja.ant $DIRSAIDA/${ORDARQ}.$loja.ant
+   fi
+
+ done
+
+   #
+   # Verifica datas a manter no historico
+   #
+
+   D0=`date +%Y%m%d`
+   D1=`date +%Y%m%d --date=yesterday`
+   D2=`date +%Y%m%d --date="2 days ago"`
+   D3=`date +%Y%m%d --date="3 days ago"`
+   D4=`date +%Y%m%d --date="4 days ago"`
+   D5=`date +%Y%m%d --date="5 days ago"`
+   D6=`date +%Y%m%d --date="6 days ago"`
+
+   for XANT in `ls ${DIRSAIDA}/*.ant 2>/dev/null`
+   do
+        grep -E "${D0}|${D1}|${D2}|${D3}|${D4}|${D5}|${D6}" ${XANT} >${XANT}.LIMPEZA
+        mv ${XANT}.LIMPEZA ${XANT}
+   done
+
+
+chmod -R 777 ${novodir}
+chown -R rsync:500 ${novodir}
+# TUDO OK
+
+done
+
+echo "${LOGDTHR} : FINAL" >>${log}
+exit
+

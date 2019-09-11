@@ -1,0 +1,85 @@
+export TERM=vt320
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+#set -x
+
+
+[ -s /DSOP/DTAB/EH_P2K_TOTAL ] && exit 0
+
+LOJA=`hostname | cut -c6-`
+SODATA=`date +%Y"-"%m"-"%d`
+XDATA=`date +%Y%m%d`
+SOHORA=`date +%H":"%M":"%S`
+DTSMB=`date +%b" "%e`
+
+EXTDATA=`date +%Y%m%d%H%M%S`
+
+dir=$VARSTAT/PDVONLINE
+[ ! -d ${dir} ] && mkdir -p ${dir}
+
+
+[ ! -s ${dir}/PDVSconectados.${XDATA} ] && >${dir}/PDVSconectados.${XDATA}
+
+LISTAECFS=`smbstatus 2>/dev/null | grep "${DTSMB}" | grep -vEi "version|locked|pid" | awk '{printf($3 "\n")}' | grep ecf`
+smbstatus | grep desen | grep -vEi "version|locked|pid" >${dir}/SMBSTATUS.txt
+
+
+>/tmp/VENDAS_ECF_pupdv002.txt
+[ -s /lasa/usr/COMNC/STARX/CUPONS/SAIDA/vendas_bcup.txt ] && cut -d"|" -f2,3,4 /lasa/usr/COMNC/STARX/CUPONS/SAIDA/vendas_bcup.txt >/tmp/VENDAS_ECF_pupdv002.txt
+
+for NNPDV in $LISTAECFS
+do
+   	linha=`grep " ${NNPDV} " ${dir}/SMBSTATUS.txt | grep desen | awk '{printf($4 $5 "\n")}' | tr -d ")" | tr -s "(" ":" | sort | uniq`
+	ECF=`echo $linha | cut -d: -f1`
+	NIP=`echo $linha | cut -d: -f2`
+
+	DATA=$SODATA
+
+	STATUS=1
+
+	[ "${ECF}" = "" ] && ECF="NA0000"
+	NECF=`echo ${ECF}  | cut -c4-`
+	TAMANHO=`echo "${NECF}" | wc -c`
+	[ $TAMANHO -eq 2 ] && NECF="00"${NECF} 
+	[ $TAMANHO -eq 3 ] && NECF="0"${NECF} 
+	[ "${NIP}" = "" -a "${NECF}" = "NA0000" ] && continue
+
+
+	[ "${NIP}" = "" ] && NIP="NA$$"
+
+	HORAPRI=`grep "|${NECF}$"  /tmp/VENDAS_ECF_pupdv002.txt 2>/dev/null | grep "^${XDATA}|" | cut -d"|" -f2 | sort | head -1`
+	HORAULT=`grep "|${NECF}$"  /tmp/VENDAS_ECF_pupdv002.txt 2>/dev/null | grep "^${XDATA}|" | cut -d"|" -f2 | sort | tail -1`
+
+	if [ "${HORAPRI}" = "" -o "${HORAULT}" = "" ] 
+	then
+		HORAPRI="000000" 
+		HORAULT="000000"
+		STATUS=0
+	fi
+
+
+	if [ `grep "^:${ECF}:${NIP}:${DATA}:${HORAPRI}:${HORAULT}:" ${dir}/PDVSconectados.${XDATA} | wc -l` -eq 0 ]
+   	then
+		echo ":${ECF}:${NIP}:${DATA}:${HORAPRI}:${HORAULT}:" >> ${dir}/PDVSconectados.${XDATA}
+
+		HRPRI=`echo ${HORAPRI} | cut -c1-2`
+		MNPRI=`echo ${HORAPRI} | cut -c3-4`
+		SGPRI=`echo ${HORAPRI} | cut -c5-6`
+		HRULT=`echo ${HORAULT} | cut -c1-2`
+		MNULT=`echo ${HORAULT} | cut -c3-4`
+		SGULT=`echo ${HORAULT} | cut -c5-6`
+
+		XHORAPRI="${HRPRI}:${MNPRI}:${SGPRI}"
+		XHORAULT="${HRULT}:${MNULT}:${SGULT}"
+
+		echo "replace into PDV_conectados values('${DATA}','${LOJA}','ecf${NECF}','${NIP}','${XHORAPRI}','${XHORAULT}',${STATUS});" >>${dir}/PDVSconectados.${LOJA}
+	fi
+
+done
+
+rm -f /tmp/VENDAS_ECF_pupdv002.txt
+
+[ -s ${dir}/PDVSconectados.${LOJA} ] && mv ${dir}/PDVSconectados.${LOJA} ${dir}/PDVSconectados.${LOJA}.${EXTDATA}.mysql
+[ $? -eq 0 ] && rm -f ${dir}/PDVSconectados.${LOJA}
+
+find ${dir} -name "PDVSconectados.????????" -mtime +5 -exec rm -f {} \;
+ 

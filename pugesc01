@@ -1,0 +1,232 @@
+if [ -s /DSOP/DTAB/EH_P2K_TOTAL -o -s /DSOP/DTAB/EH_HYDRA ]; then
+	. /DSOP/DEXE/pumake_linux & >/dev/null 2>&1
+	exit 0
+fi
+
+muname=`uname -s`
+
+
+fazbackup=0
+if [ $# -eq 1 ]
+then
+	case $1 in
+	"-B")	fazbackup=1 ;;
+	*) fazbackup=0 ;;
+	esac
+fi
+
+if [ -s /DSOP/DTAB/nao_roda_pugesc01 ]
+then
+        hoje=`date +%Y%m%d`
+        if grep "^${hoje}" /DSOP/DTAB/nao_roda_pugesc01 >/dev/null 2>&1
+        then
+                exit 0
+        fi
+fi
+
+cria_arquivos(){
+cd /lasa/usr/COMNC/CONTROLE
+for i in 002 003 004 005 006 007 008 009 010 011 012
+do
+	echo "000${i}" >dispcarg.${i}
+	chmod 777 dispcarg.${i}
+done
+}
+
+backup_cadastro(){
+dataext=`date +%Y%m%d`
+
+mata_pugesc13(){
+	PID=($(pgrep -f 'pugesc13|sgc73088|sgc73082'))
+	if [ "${#PID[@]}" -gt "0" ]; then
+		kill -9 ${PID[@]}
+	fi
+}
+
+if [ ! -s $GESCOM/GCPRDS10.${dataext}.bck ]
+then
+	find $GESCOM -name "GCPRDS10.????????.bck.Z" -mtime +1 -exec rm -f {} \;
+	find $GESCOM -name "GCPRDS10.idx.????????.bck.Z" -mtime +1 -exec rm -f {} \;
+	cp $GESCOM/GCPRDS10 $GESCOM/GCPRDS10.${dataext}.bck
+	cp $GESCOM/GCPRDS10.idx $GESCOM/GCPRDS10.idx.${dataext}.bck
+	compress -f $GESCOM/GCPRDS10.${dataext}.bck
+	compress -f $GESCOM/GCPRDS10.idx.${dataext}.bck
+fi
+}
+
+case $muname in
+AIX)
+
+loja=`hostname | cut -c6-`
+
+COBSW=-F
+export COBSW
+
+COBDIR=/opt/appsrv41
+export COBDIR
+
+LIBPATH=$COBDIR/coblib:$LIBPATH:/usr/lib
+export LIBPATH
+
+TERM=vt100
+export TERM
+
+executar="$COBDIR/bin/cobrun" 
+
+;;
+
+Linux)
+
+loja=`hostname | cut -c6-`
+
+COBSW=-F
+export COBSW
+
+COBDIR=/opt/microfocus/cobol/
+export COBDIR
+
+LIBPATH=$COBDIR/lib:$LIBPATH:/usr/lib
+export LIBPATH
+
+TERM=vt100
+export TERM
+
+executar="" 
+
+;;
+
+esac
+
+dweek=`date +%u`
+dhora=`date +%H`
+
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+
+mata_pugesc13
+
+/DSOP/DEXE/pusopo78 stop -n >/dev/null 2>&1 &
+sleep 10
+rm -f $GESCOM/term/log/* $GESCOM/tteima/log/*
+
+logg=$LOG/SUSOPO_GES001.ultimo
+_log=$LOG/SUSOPO_GES001
+>$logg
+
+umask 00
+
+if [ $dhora -ge 0 -a $dhora -le 5 ]
+then
+	cria_arquivos
+fi
+
+case $loja in
+#037|056|088|123)
+9999)
+
+[ $fazbackup -eq 1 ] && backup_cadastro
+
+/DSOP/DEXE/pusopo34 "Executando srgdelet" $logg
+$executar /lasa1/pdvs/dados/exec/srgdelet >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando srgdelet" $logg
+
+pusopo34 "Executando sgc73043" $logg
+${executar} /lasa1/pdvs/dados/exec/sgc73043 >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando sgc73043" $logg
+
+	;;
+*)
+
+[ $fazbackup -eq 1 ] && backup_cadastro
+
+#pusopo34 "Executando sgc73117" $logg
+pusopo34 "Executando sgc73008" $logg
+$executar /lasa1/pdvs/dados/exec/sgc73008 >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando sgc73008" $logg
+
+pusopo34 "Executando srgdelet" $logg
+$executar /lasa1/pdvs/dados/exec/srgdelet >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando srgdelet" $logg
+
+pusopo34 "Executando sgc73002" $logg
+$executar /lasa1/pdvs/dados/exec/sgc73002 >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando sgc73002" $logg
+
+pusopo34 "Executando sgc73043" $logg
+$executar /lasa1/pdvs/dados/exec/sgc73043 >>$logg 2>&1
+if [ $? -ne 0 ]
+then
+	pusopo34 "Houve erro na execucao" $logg
+fi
+pusopo34 "Encerrando sgc73043" $logg
+
+	;;
+esac
+
+cat $logg >> $_log
+
+if grep -i ERRO $logg >/dev/null 2>&1
+then
+	[ -x /opt/SMA/cmds/pugesc01mon ] && /opt/SMA/cmds/pugesc01mon "Erro no pugesc01"
+fi
+
+#
+# verifica cadastro da loja
+
+/DSOP/DEXE/pusopo78 start -n >/dev/null 2>&1 
+
+[ $fazbackup -eq 1 ] && /DSOP/DEXE/pugesc11
+
+#
+#
+
+# Backup do sistema N�o roda mais na cron diariamente, rodara apenas aos domingos.
+
+if [ $fazbackup -eq 1 ]
+then
+
+case $muname in
+
+Linux) . /DSOP/DEXE/pumake_linux & >/dev/null 2>&1
+	;;
+
+AIX) . /DSOP/DEXE/pumake06 & >/dev/null 2>&1
+	;;
+HP-UX)	:
+	;;
+esac
+
+fi
+
+#1. srb01140 - Conversco do log de venda dos PDV4s
+ 
+#$executar /lasa/pdvs/dados/exec/srb01140  >>$logg 2>&1
+ 
+#2 - srb01160 - Conversco do log de fechamento dos PDV4s
+ 
+#$executar /lasa/pdvs/dados/exec/srb01160  >>$logg 2>&1
+ 
+#3 - srb70102 - Geragco dos arquivos de log de venda e fechamento para retaguarda
+ 
+#$executar /lasa1/pdvs/dados/exec/srb70102 >>$logg 2>&1
+
+#

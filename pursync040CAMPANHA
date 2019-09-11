@@ -1,0 +1,10 @@
+# 
+# Transmissao de arquivo campanhas
+#
+
+export TERM=vt100
+. /DSOP/DEXE/pusopo12 >/dev/null 2>&1
+nlog="/DSOP/DLOG/`basename $0`.log"
+loja=`hostname | cut -c6-`
+
+/DSOP/RSYNC/pursyncget CAMPANHA servidor_rsync -S >>${nlog} 2>&1
